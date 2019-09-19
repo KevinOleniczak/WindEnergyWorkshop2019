@@ -10,7 +10,7 @@ import getopt, sys
 from random import randint
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTShadowClient
-import Adafruit_LSM303
+from mpu6050 import mpu6050
 import rgbled as RGBLED
 import math
 
@@ -23,7 +23,8 @@ GPIO.setmode(GPIO.BCM)
 LED_LAST_STATE = ""
 
 # Create a LSM303 instance. Accelerometer
-accelerometer = Adafruit_LSM303.LSM303()
+#accelerometer = Adafruit_LSM303.LSM303()
+accelerometer = mpu6050(0x68)
 # Alternatively you can specify the I2C bus with a bus parameter:
 #lsm303 = Adafruit_LSM303.LSM303(busum=2)
 accel_x = 0
@@ -36,8 +37,7 @@ accel_y_cal = 38
 accel_z_cal = 1052
 
 #run with...
-#python wind_turbine_device.py -e windfarm.awsworkshops.com -r ggc_rootCA.pem -c 54xxxxx9.cert.pem -k 54xxxxx9.private.key -n WindTurbine1
-#python wind_turbine_device.py -e 192.168.1.132 -r ggc_rootCA.pem -c 54xxxxx9.cert.pem -k 54xxxxx9.private.key -n WindTurbine1
+#python turbine.py -e 192.168.1.132 -r ggc_rootCA.pem -c 54xxxxx9.cert.pem -k 54xxxxx9.private.key -n WindTurbine1
 
 #AWS IoT Stuff
 myAWSIoTMQTTClient = None
@@ -67,7 +67,7 @@ GPIO.setwarnings(False)
 GPIO.setup(turbine_servo_brake_pin, GPIO.OUT)
 brakePWM = GPIO.PWM(turbine_servo_brake_pin, 50)
 brake_state = "TBD"
-brakePWM.start(8)
+brakePWM.start(0)
 
 GPIO.setup(21, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
 
@@ -112,7 +112,7 @@ def aws_connect():
                 }
             }
         }
-    myShadowClient.configureLastWill("windfarm-turbines/lwt", json.dumps(lwt_message).encode("utf-8"), 0)
+    #myShadowClient.configureLastWill("windfarm-turbines/lwt", json.dumps(lwt_message).encode("utf-8"), 0)
 
     # AWSIoTMQTTClient connection configuration
     myAWSIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
@@ -184,19 +184,25 @@ def calculate_turbine_speed():
 def calibrate_turbine_vibe():
     global accel_x_cal, accel_y_cal, accel_z_cal
     # Read the X, Y, Z axis acceleration values and print them.
-    accel, mag = accelerometer.read()
-    accel_x, accel_y, accel_z = accel
+    accel = accelerometer.get_accel_data()
+    accel_x = accel["x"]
+    accel_y = accel["y"]
+    accel_z = accel["z"] 
     print('Vibration calibration: '+ str(accel_x) + ' ' + str(accel_y) + ' ' + str(accel_z))
     # Grab the X, Y, Z components from the reading and print them out.
-    #accel_x_cal, accel_y_cal, accel_z_cal = accel
+    accel_x_cal = accel["x"]
+    accel_y_cal = accel["y"]
+    accel_z_cal = accel["z"] 
     return 1
 
 def calculate_turbine_vibe():
     global accel_x, accel_y, accel_z, accel_x_cal, accel_y_cal, accel_z_cal
     # Read the X, Y, Z axis acceleration values and print them.
-    accel, mag = accelerometer.read()
+    accel = accelerometer.get_accel_data()
     # Grab the X, Y, Z components from the reading and print them out.
-    accel_x, accel_y, accel_z = accel
+    accel_x = accel["x"]
+    accel_y = accel["y"]
+    accel_z = accel["z"]  
     #apply calibration offsets
     accel_x -= accel_x_cal
     accel_y -= accel_y_cal
