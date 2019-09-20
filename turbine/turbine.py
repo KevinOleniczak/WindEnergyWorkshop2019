@@ -229,7 +229,7 @@ def turbine_brake_action(action):
         RGBLED.whiteOff()
         RGBLED.redOn()
         LED_LAST_STATE = "Red"
-        brakePWM.ChangeDutyCycle(6) 
+        brakePWM.ChangeDutyCycle(6.5) 
     elif action == "OFF":
         print "Resetting turbine brake."
         RGBLED.whiteOff()
@@ -583,6 +583,6 @@ if __name__ == "__main__":
     if missingConfiguration:
         exit(2)
 
-    logging.basicConfig(filename='wind_turbine_device.log',level=logging.INFO,format='%(asctime)s %(message)s')
+    logging.basicConfig(filename='turbine.log',level=logging.INFO,format='%(asctime)s %(message)s')
     logger.info("Welcome to the AWS Windfarm Turbine Device Reporter.")
     main()
