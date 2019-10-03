@@ -578,6 +578,6 @@ if __name__ == "__main__":
     if missingConfiguration:
         exit(2)
 
-    logging.basicConfig(filename='wind_turbine_device.log',level=logging.INFO,format='%(asctime)s %(message)s')
+    logging.basicConfig(filename='turbine.log',level=logging.INFO,format='%(asctime)s %(message)s')
     logger.info("Welcome to the AWS Windfarm Turbine Device Reporter.")
     main()
