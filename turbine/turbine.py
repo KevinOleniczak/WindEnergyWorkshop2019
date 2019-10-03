@@ -229,7 +229,7 @@ def turbine_brake_action(action):
         RGBLED.whiteOff()
         RGBLED.redOn()
         LED_LAST_STATE = "Red"
-        brakePWM.ChangeDutyCycle(6) 
+        brakePWM.ChangeDutyCycle(6.5) 
     elif action == "OFF":
         print "Resetting turbine brake."
         RGBLED.whiteOff()
@@ -448,14 +448,9 @@ def main():
 
             avg_vibe = sum(myVibeDataList) / len(myVibeDataList)
             myReport = {
-                'deviceID' : myUUID,
                 'thing_name' : myClientID,
                 'timestamp' : str(datetime.datetime.utcnow().isoformat()),
                 'loop_cnt' : str(my_loop_cnt),
-                'location' : "ORD10-14",
-                'lat' : 42.888,
-                'lng' : -88.123,
-                'turbine_temp' : 75, #temp fix
                 'turbine_speed' : rpm,
                 'turbine_rev_cnt' : pulse,
                 'turbine_voltage' : str(get_turbine_voltage()),
