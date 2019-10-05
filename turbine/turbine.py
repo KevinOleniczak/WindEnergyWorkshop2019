@@ -62,6 +62,9 @@ last_pulse = 0
 start_timer = time.time()
 
 #Servo control for turbine brake
+FullBrakeOffPosPWM = 7.5
+myBrakePosPWM = FullBrakeOffPosPWM
+FullBrakeOnPosPWM = FullBrakeOffPosPWM 
 turbine_servo_brake_pin = 15 #pin 10
 GPIO.setwarnings(False)
 GPIO.setup(turbine_servo_brake_pin, GPIO.OUT)
@@ -142,7 +145,7 @@ def aws_connect():
     myDeviceShadow.shadowUpdate(json.dumps(conn_message).encode("utf-8"), myShadowCallback, 5)
     print ("AWS IoT Shadow Connected")
 
-    myAWSIoTMQTTClient.subscribe("$aws/things/" + myClientID + "/jobs/notify-next", 1, customCallbackJobs)
+    myAWSIoTMQTTClient.subscribe("turbines/cmd/" + myClientID + "/#", 1, customCallbackCmd)
     print ("AWS IoT Jobs Connected")
 
 def init_turbine_GPIO():                    # initialize GPIO
@@ -218,24 +221,26 @@ def get_turbine_voltage():
     return calcVolt
 
 def turbine_brake_action(action):
-    global brakePWM,brake_state,myDeviceShadow,LED_LAST_STATE
+    global brakePWM,brake_state,myDeviceShadow,LED_LAST_STATE,myBrakePosPWM,FullBrakeOnPosPWM,FullBrakeOffPosPWM
     if action == brake_state:
         #thats already the known action state
         #print "Already there"
         return "Already there"
 
     if action == "ON":
-        print "Applying turbine brake!"
+        print ("Applying turbine brake!")
         RGBLED.whiteOff()
         RGBLED.redOn()
         LED_LAST_STATE = "Red"
-        brakePWM.ChangeDutyCycle(6.5) 
+        myBrakePosPWM = FullBrakeOnPosPWM 
+        brakePWM.ChangeDutyCycle(myBrakePosPWM) 
     elif action == "OFF":
-        print "Resetting turbine brake."
+        print ("Resetting turbine brake.")
         RGBLED.whiteOff()
         RGBLED.greenOn()
         LED_LAST_STATE = "Green"
-        brakePWM.ChangeDutyCycle(7.5)
+        myBrakePosPWM = FullBrakeOffPosPWM 
+        brakePWM.ChangeDutyCycle(myBrakePosPWM)
     else:
         return "NOT AN ACTION"
     brake_state = action
@@ -262,6 +267,36 @@ def turbine_brake_action(action):
                 still_trying = False
 
     return brake_state
+
+
+def turbine_brake_change (newPWMval,newActionDurSec,newReturnToOff):
+    global brakePWM,brake_state,LED_LAST_STATE,FullBrakeOffPosPWM
+    RGBLED.whiteOff()
+    if newPWMval == FullBrakeOffPosPWM:
+        RGBLED.magentaOff()
+        RGBLED.greenOn()
+        LED_LAST_STATE = "Green"
+    else:
+        RGBLED.magentaOn()
+        LED_LAST_STATE = "Magenta" 
+    brakePWM.ChangeDutyCycle(newPWMval)
+    if newActionDurSec == None:
+        sleep(1)
+    else:
+        sleep(newActionDurSec)
+    
+    if newReturnToOff:
+        #return to off position and then stop
+        brakePWM.ChangeDutyCycle(FullBrakeOffPosPWM)
+        sleep(0.5)
+        brakePWM.ChangeDutyCycle(0)
+    else:
+        #remove brake pressure after specified duration 
+        brakePWM.ChangeDutyCycle(0)
+
+    RGBLED.magentaOff()
+    RGBLED.greenOn()
+    LED_LAST_STATE = "Green"
 
 def request_turbine_brake_action(action):
     global myDeviceShadow,LED_LAST_STATE
@@ -334,12 +369,12 @@ def init_turbine_interrupt():
 
 def myShadowCallbackDelta(payload, responseStatus, token):
     global myClientID,myDataSendMode,myDataInterval
-    print responseStatus
-    print "delta shadow callback >> " + payload
+    #print (responseStatus)
+    print ("delta shadow callback >> " + payload)
 
     if responseStatus == "delta/" + myClientID:
         payloadDict = json.loads(payload)
-        print "shadow delta >> " + payload
+        print ("shadow delta >> " + payload)
         try:
             if "brake_status" in payloadDict["state"]:
                  turbine_brake_action(payloadDict["state"]["brake_status"])
@@ -348,23 +383,15 @@ def myShadowCallbackDelta(payload, responseStatus, token):
             if "data_fast_interval" in payloadDict["state"]:
                  myDataInterval = int(process_data_path_changes("data_fast_interval", payloadDict["state"]["data_fast_interval"]))
         except:
-            print "delta cb error"
+            print ("delta cb error")
 
 def myShadowCallback(payload, responseStatus, token):
-    # payload is a JSON string ready to be parsed using json.loads(...)
-    # in both Py2.x and Py3.x
-    #print responseStatus
-    #print "shadow callback >> " + payload
 
     if responseStatus == "timeout":
         print("Update request " + token + " time out!")
 
     if responseStatus == "accepted":
-        print "shadow accepted"
-        #payloadDict = json.loads(payload)
-        #print("Update request with token: " + token + " accepted!")
-        #print("property: " + str(payloadDict["state"]["desired"]["property"]))
-        #print("~~~~~~~~~~~~~~~~~~~~~~~\n\n")
+        print("shadow accepted")
 
     if responseStatus == "rejected":
         print("Update request " + token + " rejected!")
@@ -372,11 +399,11 @@ def myShadowCallback(payload, responseStatus, token):
 def customCallbackJobs(payload, responseStatus, token):
     global myClientID,myDataSendMode,myDataInterval
     print responseStatus
-    print "Next job callback >> " + payload
+    print ("Next job callback >> " + payload)
 
     if responseStatus == "delta/" + myClientID:
         payloadDict = json.loads(payload)
-        print "shadow delta >> " + payload
+        print ("shadow delta >> " + payload)
         try:
             if "brake_status" in payloadDict["state"]:
                  turbine_brake_action(payloadDict["state"]["brake_status"])
@@ -385,17 +412,40 @@ def customCallbackJobs(payload, responseStatus, token):
             if "data_fast_interval" in payloadDict["state"]:
                  myDataInterval = process_data_path_changes("data_fast_interval", payloadDict["state"]["data_fast_interval"])
         except:
-            print "delta cb error"
+            print ("delta cb error")
 
-def evaluate_turbine_safety():
-    global rpm
-    if rpm > 20:
-        request_turbine_brake_action("ON")
-    #else:
-    #    turbine_brake_action("OFF")
+def customCallbackCmd(client, userdata, message):
+    global myClientID,myDataSendMode,myDataInterval,myBrakePosPWM
+    if message.topic == "turbines/cmd/" + myClientID + "/brake":
+        payloadDict = json.loads(message.payload)
+        try: 
+            myBrakePosPWM = float(payloadDict["pwm_value"])
+            myBrakeActionDurSec = None
+            if "duration_sec" in payloadDict:
+                myDurSec = int(payloadDict["duration_sec"])
+            else:
+                myDurSec = 1
+
+            if "return_to_off" in payloadDict:
+                myRet2Off = bool(payloadDict["return_to_off"])
+            else:
+                myRet2Off = True 
+
+            if "duration_sec" in payloadDict:
+                myDurSec = int(payloadDict["duration_sec"])
+                print ("Brake change >> " + str(myBrakePosPWM) + " with duration of " + str(myDurSec) + " seconds")
+            else:
+                myDurSec = 1
+                print ("Brake change >> " + str(myBrakePosPWM) + " with duration of 1 second") 
+            
+            turbine_brake_change(myBrakePosPWM, myBrakeActionDurSec, myRet2Off)
+      
+        except:
+            print ("brake change failed")
+
 
 def main():
-    global myClientID,rpm,pulse,myAWSIoTMQTTClient,myShadowClient,myDeviceShadow,myDataSendMode,myDataInterval,LED_LAST_STATE
+    global myClientID,rpm,pulse,myAWSIoTMQTTClient,myShadowClient,myDeviceShadow,myDataSendMode,myDataInterval,LED_LAST_STATE,myBrakePosPWM
     RGBLED.whiteOff()
     RGBLED.blueOn()
     my_loop_cnt = 0
@@ -411,7 +461,7 @@ def main():
         sleep(5)
         init_turbine_brake()
         calibrate_turbine_vibe()
-        print "Turbine Monitoring Starting..."
+        print("Turbine Monitoring Starting...")
         RGBLED.whiteOff()
         RGBLED.greenOn()
         LED_LAST_STATE = "Green"
@@ -435,6 +485,7 @@ def main():
             for data_sample_cnt in range(myDataIntervalCnt, 0, -1):
                 calculate_turbine_vibe()
                 vibe = math.sqrt(accel_x ** 2 + accel_y ** 2 + accel_z ** 2)
+                
                 #store the peak vibration value
                 peak_vibe = max(peak_vibe, vibe)
                 myVibeDataList.append(vibe)
@@ -449,6 +500,7 @@ def main():
             avg_vibe = sum(myVibeDataList) / len(myVibeDataList)
             myReport = {
                 'thing_name' : myClientID,
+                'deviceID' : myUUID,
                 'timestamp' : str(datetime.datetime.utcnow().isoformat()),
                 'loop_cnt' : str(my_loop_cnt),
                 'turbine_speed' : rpm,
@@ -459,7 +511,8 @@ def main():
                 'turbine_vibe_z' : peak_vibe_z,
                 'turbine_vibe_peak': peak_vibe,
                 'turbine_vibe_avg': avg_vibe,
-                'turbine_sample_cnt': str(len(myVibeDataList))
+                'turbine_sample_cnt': str(len(myVibeDataList)),
+                'turbine_brake_position': myBrakePosPWM 
                 }
 
             try:
@@ -478,6 +531,8 @@ def main():
                      sleep(0.08)
                      if LED_LAST_STATE == "Red":
                          RGBLED.redOn()
+                     if LED_LAST_STATE == "Magenta":
+                         RGBLED.magentaOn()
                      else:
                          RGBLED.greenOn()
             except:
@@ -498,7 +553,7 @@ def main():
         sleep(1)
         myShadowClient.disconnect()
         sleep(2)
-        print ("Done.\nExiting.")
+        print("Done.\nExiting.")
 
 if __name__ == "__main__":
 
