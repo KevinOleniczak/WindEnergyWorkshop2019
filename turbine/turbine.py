@@ -136,7 +136,7 @@ def aws_connect():
     myDeviceShadow.shadowRegisterDeltaCallback(myShadowCallbackDelta)
     print ("AWS IoT Shadow Topic Subscribed")
 
-    myAWSIoTMQTTClient.subscribe("turbines/cmd/" + myClientID + "/#", 1, customCallbackCmd)
+    myAWSIoTMQTTClient.subscribe("cmd/windfarm/turbine/" + myClientID + "/#", 1, customCallbackCmd)
     print ("AWS IoT Command Topic Subscribed")
 
 def init_turbine_GPIO():                    # initialize GPIO
