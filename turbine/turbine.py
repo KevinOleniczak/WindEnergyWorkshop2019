@@ -134,19 +134,10 @@ def aws_connect():
     myShadowClient.connect()
     myDeviceShadow = myShadowClient.createShadowHandlerWithName(myClientID, True)
     myDeviceShadow.shadowRegisterDeltaCallback(myShadowCallbackDelta)
-
-    conn_message = {
-            "state": {
-                "reported": {
-                    "connected":"true"
-                }
-            }
-        }
-    myDeviceShadow.shadowUpdate(json.dumps(conn_message).encode("utf-8"), myShadowCallback, 5)
-    print ("AWS IoT Shadow Connected")
+    print ("AWS IoT Shadow Topic Subscribed")
 
     myAWSIoTMQTTClient.subscribe("turbines/cmd/" + myClientID + "/#", 1, customCallbackCmd)
-    print ("AWS IoT Jobs Connected")
+    print ("AWS IoT Command Topic Subscribed")
 
 def init_turbine_GPIO():                    # initialize GPIO
     global turbine_rotation_sensor_pin
@@ -234,6 +225,9 @@ def turbine_brake_action(action):
         LED_LAST_STATE = "Red"
         myBrakePosPWM = FullBrakeOnPosPWM 
         brakePWM.ChangeDutyCycle(myBrakePosPWM) 
+        sleep(3)
+        brakePWM.ChangeDutyCycle(0)
+
     elif action == "OFF":
         print ("Resetting turbine brake.")
         RGBLED.whiteOff()
@@ -241,6 +235,9 @@ def turbine_brake_action(action):
         LED_LAST_STATE = "Green"
         myBrakePosPWM = FullBrakeOffPosPWM 
         brakePWM.ChangeDutyCycle(myBrakePosPWM)
+        sleep(1)
+        brakePWM.ChangeDutyCycle(0)
+
     else:
         return "NOT AN ACTION"
     brake_state = action
@@ -396,23 +393,6 @@ def myShadowCallback(payload, responseStatus, token):
     if responseStatus == "rejected":
         print("Update request " + token + " rejected!")
 
-def customCallbackJobs(payload, responseStatus, token):
-    global myClientID,myDataSendMode,myDataInterval
-    print responseStatus
-    print ("Next job callback >> " + payload)
-
-    if responseStatus == "delta/" + myClientID:
-        payloadDict = json.loads(payload)
-        print ("shadow delta >> " + payload)
-        try:
-            if "brake_status" in payloadDict["state"]:
-                 turbine_brake_action(payloadDict["state"]["brake_status"])
-            if "data_path" in payloadDict["state"]:
-                 myDataSendMode = process_data_path_changes("data_path", payloadDict["state"]["data_path"])
-            if "data_fast_interval" in payloadDict["state"]:
-                 myDataInterval = process_data_path_changes("data_fast_interval", payloadDict["state"]["data_fast_interval"])
-        except:
-            print ("delta cb error")
 
 def customCallbackCmd(client, userdata, message):
     global myClientID,myDataSendMode,myDataInterval,myBrakePosPWM
@@ -451,7 +431,7 @@ def main():
     my_loop_cnt = 0
     data_sample_cnt = 0
     last_reported_speed = -1
-    myDataIntervalCnt = 19
+    myDataIntervalCnt = 50 
     myVibeDataList = []
 
     try:
@@ -475,11 +455,7 @@ def main():
             peak_vibe_y = 0
             peak_vibe_z = 0
             del myVibeDataList[:]
-
-            if myDataSendMode == "faster":
-                myDataIntervalCnt = myDataInterval
-            else:
-                myDataIntervalCnt = 50
+            myDataIntervalCnt = 50
 
             #sampling of vibration between published messages
             for data_sample_cnt in range(myDataIntervalCnt, 0, -1):
@@ -518,13 +494,7 @@ def main():
             try:
                 print('rpm:{0:.0f}-RPM pulse:{1} peak-accel:{2} avg-vibe:{6} brake:{3} cnt:{4} voltage:{5}'.format(rpm,pulse,peak_vibe,brake_state,str(my_loop_cnt),str(get_turbine_voltage()),str(avg_vibe)) )
                 if rpm > 0 or last_reported_speed != 0:
-                     if myDataSendMode == "faster":
-                         myTopic = "windturbine-data-faster"
-                     elif myDataSendMode == "cheaper":
-                         myTopic = "windturbine-data-cheaper"
-                     else:
-                         myTopic = "turbines/data/" + myClientID
-
+                     myTopic = "dt/windfarm/turbine/" + myClientID
                      last_reported_speed = rpm
                      RGBLED.whiteOff()
                      myAWSIoTMQTTClient.publish(myTopic, json.dumps(myReport), 0)
@@ -542,15 +512,6 @@ def main():
     except (KeyboardInterrupt, SystemExit): #when you press ctrl+c
         print("Disconnecting AWS IoT")
         RGBLED.whiteOff()
-        conn_message = {
-            "state": {
-                "reported": {
-                    "connected":"false"
-                }
-            }
-        }
-        myDeviceShadow.shadowUpdate(json.dumps(conn_message).encode("utf-8"), myShadowCallback, 5)
-        sleep(1)
         myShadowClient.disconnect()
         sleep(2)
         print("Done.\nExiting.")
