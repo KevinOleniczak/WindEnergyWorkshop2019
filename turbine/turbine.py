@@ -1,3 +1,17 @@
+# Copyright 2018. Amazon Web Services, Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from __future__ import division
 import logging
 import RPi.GPIO as GPIO
@@ -14,8 +28,9 @@ from mpu6050 import mpu6050
 import rgbled as RGBLED
 import math
 
+print ("AWS IoT Wind Energy Turbine Program") 
 myUUID = str(uuid.getnode())
-print(myUUID)
+print("DeviceID: " + myUUID)
 
 logger = logging.getLogger(__name__)
 GPIO.setmode(GPIO.BCM)
@@ -74,15 +89,12 @@ brakePWM.start(0)
 
 GPIO.setup(21, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
 
-# ADC MCP3008
-# Software SPI configuration:
-#import Adafruit_GPIO.SPI as SPI
+#ADC MCP3008
 import Adafruit_MCP3008
 CLK  = 11 #pin 23
-MISO = 9 #pin 21
+MISO = 9  #pin 21
 MOSI = 10 #pin 19
-CS   = 8 #pin 24
-#mcp = Adafruit_MCP3008.MCP3008(23, 24, 21, 19)
+CS   = 8  #pin 24
 mcp = Adafruit_MCP3008.MCP3008(clk=CLK, cs=CS, miso=MISO, mosi=MOSI)
 
 def aws_connect():
@@ -108,15 +120,6 @@ def aws_connect():
         myShadowClient.configureCredentials(rootCAPath, privateKeyPath, certificatePath)
         myAWSIoTMQTTClient = myShadowClient.getMQTTConnection()
 
-    lwt_message = {
-            "state": {
-                "reported": {
-                    "connected":"false"
-                }
-            }
-        }
-    #myShadowClient.configureLastWill("windfarm-turbines/lwt", json.dumps(lwt_message).encode("utf-8"), 0)
-
     # AWSIoTMQTTClient connection configuration
     myAWSIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
     myAWSIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
@@ -124,7 +127,6 @@ def aws_connect():
     myAWSIoTMQTTClient.configureConnectDisconnectTimeout(5)  # 10 sec
     myAWSIoTMQTTClient.configureMQTTOperationTimeout(5)  # 5 sec
     myAWSIoTMQTTClient.connect()
-    #myAWSIoTMQTTClient.subscribe("$aws/...", 1, customCallbackDeltaTest)
     print ("AWS IoT Connected")
 
     # Shadow config
@@ -135,9 +137,10 @@ def aws_connect():
     myDeviceShadow = myShadowClient.createShadowHandlerWithName(myClientID, True)
     myDeviceShadow.shadowRegisterDeltaCallback(myShadowCallbackDelta)
     print ("AWS IoT Shadow Topic Subscribed")
-
-    myAWSIoTMQTTClient.subscribe("cmd/windfarm/turbine/" + myClientID + "/#", 1, customCallbackCmd)
-    print ("AWS IoT Command Topic Subscribed")
+    
+    cmdTopic = "cmd/windfarm/turbine/" + myClientID + "/brake"
+    myAWSIoTMQTTClient.subscribe(cmdTopic, 1, customCallbackCmd)
+    print ("AWS IoT Command Topic Subscribed: " + cmdTopic)
 
 def init_turbine_GPIO():                    # initialize GPIO
     global turbine_rotation_sensor_pin
@@ -366,7 +369,6 @@ def init_turbine_interrupt():
 
 def myShadowCallbackDelta(payload, responseStatus, token):
     global myClientID,myDataSendMode,myDataInterval
-    #print (responseStatus)
     print ("delta shadow callback >> " + payload)
 
     if responseStatus == "delta/" + myClientID:
@@ -383,7 +385,6 @@ def myShadowCallbackDelta(payload, responseStatus, token):
             print ("delta cb error")
 
 def myShadowCallback(payload, responseStatus, token):
-
     if responseStatus == "timeout":
         print("Update request " + token + " time out!")
 
@@ -393,10 +394,9 @@ def myShadowCallback(payload, responseStatus, token):
     if responseStatus == "rejected":
         print("Update request " + token + " rejected!")
 
-
 def customCallbackCmd(client, userdata, message):
     global myClientID,myDataSendMode,myDataInterval,myBrakePosPWM
-    if message.topic == "turbines/cmd/" + myClientID + "/brake":
+    if message.topic == "cmd/windfarm/turbine/" + myClientID + "/brake":
         payloadDict = json.loads(message.payload)
         try: 
             myBrakePosPWM = float(payloadDict["pwm_value"])
@@ -488,11 +488,11 @@ def main():
                 'turbine_vibe_peak': peak_vibe,
                 'turbine_vibe_avg': avg_vibe,
                 'turbine_sample_cnt': str(len(myVibeDataList)),
-                'turbine_brake_position': myBrakePosPWM 
+                'pwm_value': myBrakePosPWM 
                 }
 
             try:
-                print('rpm:{0:.0f}-RPM pulse:{1} peak-accel:{2} avg-vibe:{6} brake:{3} cnt:{4} voltage:{5}'.format(rpm,pulse,peak_vibe,brake_state,str(my_loop_cnt),str(get_turbine_voltage()),str(avg_vibe)) )
+                print('rpm:{0:.0f}-RPM pulse:{1} peak-vibe:{2} avg-vibe:{6} brake_pwm:{3} loop_cnt:{4} voltage:{5}'.format(rpm,pulse,peak_vibe,str(myBrakePosPWM),str(my_loop_cnt),str(get_turbine_voltage()),str(avg_vibe)) )
                 if rpm > 0 or last_reported_speed != 0:
                      myTopic = "dt/windfarm/turbine/" + myClientID
                      last_reported_speed = rpm
@@ -566,7 +566,7 @@ if __name__ == "__main__":
                 privateKeyPath = arg
             if opt in ("-n", "--thingName"):
                 myClientID = arg
-                print(myClientID)
+                print("ThingName: " + myClientID)
             if opt in ("-w", "--websocket"):
                 useWebsocket = True
     except getopt.GetoptError:
