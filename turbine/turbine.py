@@ -37,22 +37,15 @@ GPIO.setmode(GPIO.BCM)
 
 LED_LAST_STATE = ""
 
-# Create a LSM303 instance. Accelerometer
-#accelerometer = Adafruit_LSM303.LSM303()
 accelerometer = mpu6050(0x68)
-# Alternatively you can specify the I2C bus with a bus parameter:
-#lsm303 = Adafruit_LSM303.LSM303(busum=2)
 accel_x = 0
 accel_y = 0
 accel_z = 0
 
 #calibration offsets
-accel_x_cal = -3
-accel_y_cal = 38
-accel_z_cal = 1052
-
-#run with...
-#python turbine.py -e 192.168.1.132 -r ggc_rootCA.pem -c 54xxxxx9.cert.pem -k 54xxxxx9.private.key -n WindTurbine1
+accel_x_cal = 0 
+accel_y_cal = 0 
+accel_z_cal = 0 
 
 #AWS IoT Stuff
 myAWSIoTMQTTClient = None
@@ -103,42 +96,30 @@ def aws_connect():
     global myShadowClient
     global myDeviceShadow
 
-    if useWebsocket:
-        myAWSIoTMQTTClient = AWSIoTMQTTClient(myClientID, useWebsocket=True)
-        myAWSIoTMQTTClient.configureEndpoint(host, 443)
-        myAWSIoTMQTTClient.configureCredentials(rootCAPath)
-
-        myShadowClient = AWSIoTMQTTShadowClient(myClientID)
-
-    else:
-        #myAWSIoTMQTTClient = AWSIoTMQTTClient(myClientID)
-        #myAWSIoTMQTTClient.configureEndpoint(host, 8883)
-        #myAWSIoTMQTTClient.configureCredentials(rootCAPath, privateKeyPath, certificatePath)
-
-        myShadowClient = AWSIoTMQTTShadowClient(myClientID)
-        myShadowClient.configureEndpoint(host, 8883)
-        myShadowClient.configureCredentials(rootCAPath, privateKeyPath, certificatePath)
-        myAWSIoTMQTTClient = myShadowClient.getMQTTConnection()
+    myShadowClient = AWSIoTMQTTShadowClient(myClientID)
+    myShadowClient.configureEndpoint(host, 8883)
+    myShadowClient.configureCredentials(rootCAPath, privateKeyPath, certificatePath)
+    myAWSIoTMQTTClient = myShadowClient.getMQTTConnection()
 
     # AWSIoTMQTTClient connection configuration
     myAWSIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
     myAWSIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
     myAWSIoTMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
-    myAWSIoTMQTTClient.configureConnectDisconnectTimeout(5)  # 10 sec
-    myAWSIoTMQTTClient.configureMQTTOperationTimeout(5)  # 5 sec
+    myAWSIoTMQTTClient.configureConnectDisconnectTimeout(10)  # 10 sec
+    myAWSIoTMQTTClient.configureMQTTOperationTimeout(10)  # 10 sec
     myAWSIoTMQTTClient.connect()
     print ("AWS IoT Connected")
 
     # Shadow config
     myShadowClient.configureAutoReconnectBackoffTime(1, 32, 20)
     myShadowClient.configureConnectDisconnectTimeout(10)  # 10 sec
-    myShadowClient.configureMQTTOperationTimeout(10)  # 5 sec
+    myShadowClient.configureMQTTOperationTimeout(10)  # 10 sec
     myShadowClient.connect()
     myDeviceShadow = myShadowClient.createShadowHandlerWithName(myClientID, True)
     myDeviceShadow.shadowRegisterDeltaCallback(myShadowCallbackDelta)
     print ("AWS IoT Shadow Topic Subscribed")
     
-    cmdTopic = "cmd/windfarm/turbine/" + myClientID + "/brake"
+    cmdTopic = "cmd/windfarm/turbine/" + myClientID + "/#"
     myAWSIoTMQTTClient.subscribe(cmdTopic, 1, customCallbackCmd)
     print ("AWS IoT Command Topic Subscribed: " + cmdTopic)
 
@@ -196,15 +177,16 @@ def calculate_turbine_vibe():
     global accel_x, accel_y, accel_z, accel_x_cal, accel_y_cal, accel_z_cal
     # Read the X, Y, Z axis acceleration values and print them.
     accel = accelerometer.get_accel_data()
+    
     # Grab the X, Y, Z components from the reading and print them out.
     accel_x = accel["x"]
     accel_y = accel["y"]
     accel_z = accel["z"]  
-    #apply calibration offsets
+    
+    # Apply calibration offsets
     accel_x -= accel_x_cal
     accel_y -= accel_y_cal
     accel_z -= accel_z_cal
-    #mag_x, mag_z, mag_y = mag
     return 1
 
 def get_turbine_voltage():
@@ -217,8 +199,6 @@ def get_turbine_voltage():
 def turbine_brake_action(action):
     global brakePWM,brake_state,myDeviceShadow,LED_LAST_STATE,myBrakePosPWM,FullBrakeOnPosPWM,FullBrakeOffPosPWM
     if action == brake_state:
-        #thats already the known action state
-        #print "Already there"
         return "Already there"
 
     if action == "ON":
@@ -438,8 +418,9 @@ def main():
         aws_connect()
         init_turbine_GPIO()
         init_turbine_interrupt()
-        sleep(5)
+        sleep(3)
         init_turbine_brake()
+        print("Keep the turbine stationary for calibration.")
         calibrate_turbine_vibe()
         print("Turbine Monitoring Starting...")
         RGBLED.whiteOff()
@@ -492,7 +473,7 @@ def main():
                 }
 
             try:
-                print('rpm:{0:.0f}-RPM pulse:{1} peak-vibe:{2} avg-vibe:{6} brake_pwm:{3} loop_cnt:{4} voltage:{5}'.format(rpm,pulse,peak_vibe,str(myBrakePosPWM),str(my_loop_cnt),str(get_turbine_voltage()),str(avg_vibe)) )
+                print('rpm:{0:.0f}-RPM turbine_rev_cnt:{1} peak-vibe:{2} avg-vibe:{6} brake_pwm:{3} loop_cnt:{4} voltage:{5}'.format(rpm,pulse,peak_vibe,str(myBrakePosPWM),str(my_loop_cnt),str(get_turbine_voltage()),str(avg_vibe)) )
                 if rpm > 0 or last_reported_speed != 0:
                      myTopic = "dt/windfarm/turbine/" + myClientID
                      last_reported_speed = rpm
