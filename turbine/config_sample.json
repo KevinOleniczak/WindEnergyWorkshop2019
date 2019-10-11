@@ -1,0 +1,30 @@
+{
+  "certsPath" : "~/certs",
+  "deviceThing" : {
+    "caPath" : "",
+    "certPath" : "",
+    "keyPath" : "",
+    "thingName" : "",
+    "endPointIp" : "",
+    "endPointPort" : "8883"
+  },
+  "runtime" : {
+    "cgroup" : {
+      "useSystemd" : "yes"
+    },
+    "connection": {
+      "timeout_sec": 10,
+      "retry_limit": 3
+    }
+  },
+  "settings": {
+    "brake_servo": {
+      "BrakeMinPosPWM": 6,
+      "BrakeMaxPosPWM": 8,
+      "FullBrakeOffPosPWM": 7.5
+    },
+    "vibration": {
+      "data_sample_cnt": 50
+    }
+  }
+}
