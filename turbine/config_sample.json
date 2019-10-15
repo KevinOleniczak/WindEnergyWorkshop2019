@@ -6,7 +6,7 @@
     "keyPath" : "",
     "thingName" : "",
     "endPointIp" : "",
-    "endPointPort" : "8883"
+    "mqttPort" : "8883"
   },
   "runtime" : {
     "cgroup" : {
