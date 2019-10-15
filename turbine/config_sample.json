@@ -19,9 +19,8 @@
   },
   "settings": {
     "brakeServo": {
-      "minPosition": 6,
-      "maxPosition": 8,
-      "offPosition": 7.5
+      "onPosition": 6,
+      "offPosition": 8
     },
     "vibration": {
       "dataSampleCnt": 50
