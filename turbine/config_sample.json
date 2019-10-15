@@ -1,5 +1,5 @@
 {
-  "certsPath" : "~/certs",
+  "certsPath" : "/home/pi/certs",
   "deviceThing" : {
     "caPath" : "",
     "certPath" : "",
@@ -13,18 +13,18 @@
       "useSystemd" : "yes"
     },
     "connection": {
-      "timeout_sec": 10,
-      "retry_limit": 3
+      "timeoutSec": 10,
+      "retryLimit": 3
     }
   },
   "settings": {
-    "brake_servo": {
-      "BrakeMinPosPWM": 6,
-      "BrakeMaxPosPWM": 8,
-      "FullBrakeOffPosPWM": 7.5
+    "brakeServo": {
+      "minPosition": 6,
+      "maxPosition": 8,
+      "offPosition": 7.5
     },
     "vibration": {
-      "data_sample_cnt": 50
+      "dataSampleCnt": 50
     }
   }
 }
