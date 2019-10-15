@@ -1,7 +1,7 @@
 {
   "certsPath" : "/home/pi/certs",
   "deviceThing" : {
-    "caPath" : "",
+    "caPath" : "AmazonRootCA1.pem",
     "certPath" : "",
     "keyPath" : "",
     "thingName" : "",
