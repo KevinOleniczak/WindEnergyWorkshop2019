@@ -5,7 +5,7 @@
     "certPath" : "",
     "keyPath" : "",
     "thingName" : "",
-    "endPointIp" : "",
+    "endPoint" : "",
     "mqttPort" : "8883"
   },
   "runtime" : {

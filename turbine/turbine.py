@@ -14,6 +14,7 @@
 
 from __future__ import division
 import logging
+import os.path
 import RPi.GPIO as GPIO
 from time import sleep
 import time, math
@@ -28,9 +29,23 @@ from mpu6050 import mpu6050
 import rgbled as RGBLED
 import math
 
-print ("AWS IoT Wind Energy Turbine Program") 
+#configurable settings from the config.json file
+configFile = None
+myConfig = {}
+cfgCertsPath = ""
+cfgCaPath = ""
+cfgCertPath = ""
+cfgKeyPath = ""
+cfgThingName = ""
+cfgEndPoint = ""
+cfgMqttPort = ""
+cfgTimeoutSec = 10
+cfgRetryLimit = 3
+cfgBrakeOnPosition = 6.5
+cfgBrakeOffPosition = 8
+cfgVibeDataSampleCnt = 50
+
 myUUID = str(uuid.getnode())
-print("DeviceID: " + myUUID)
 
 logger = logging.getLogger(__name__)
 GPIO.setmode(GPIO.BCM)
@@ -43,20 +58,14 @@ accel_y = 0
 accel_z = 0
 
 #calibration offsets
-accel_x_cal = 0 
-accel_y_cal = 0 
-accel_z_cal = 0 
+accel_x_cal = 0
+accel_y_cal = 0
+accel_z_cal = 0
 
 #AWS IoT Stuff
 myAWSIoTMQTTClient = None
 myShadowClient = None
 myDeviceShadow = None
-useWebsocket = False
-myClientID = ""
-host = ""
-rootCAPath = ""
-certificatePath = ""
-privateKeyPath = ""
 aws_session = None
 myDataSendMode = "normal"
 myDataInterval = 5
@@ -70,9 +79,9 @@ last_pulse = 0
 start_timer = time.time()
 
 #Servo control for turbine brake
-FullBrakeOffPosPWM = 7.5
-myBrakePosPWM = FullBrakeOffPosPWM
-FullBrakeOnPosPWM = FullBrakeOffPosPWM 
+cfgBrakeOffPosition = 7.5
+myBrakePosPWM = cfgBrakeOffPosition
+cfgBrakeOnPosition = cfgBrakeOffPosition
 turbine_servo_brake_pin = 15 #pin 10
 GPIO.setwarnings(False)
 GPIO.setup(turbine_servo_brake_pin, GPIO.OUT)
@@ -82,7 +91,7 @@ brakePWM.start(0)
 
 GPIO.setup(21, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
 
-#ADC MCP3008
+#ADC MCP3008 used to sample the voltage level
 import Adafruit_MCP3008
 CLK  = 11 #pin 23
 MISO = 9  #pin 21
@@ -96,42 +105,56 @@ def aws_connect():
     global myShadowClient
     global myDeviceShadow
 
-    myShadowClient = AWSIoTMQTTShadowClient(myClientID)
-    myShadowClient.configureEndpoint(host, 8883)
-    myShadowClient.configureCredentials(rootCAPath, privateKeyPath, certificatePath)
+    ca = cfgCertsPath + '/' + cfgCaPath
+    key = cfgCertsPath + '/' + cfgKeyPath
+    cert = cfgCertsPath + '/' + cfgCertPath
+
+    myShadowClient = AWSIoTMQTTShadowClient(cfgThingName)
+    myShadowClient.configureEndpoint(cfgEndPoint, cfgMqttPort)
+    myShadowClient.configureCredentials(ca, key, cert)
     myAWSIoTMQTTClient = myShadowClient.getMQTTConnection()
 
     # AWSIoTMQTTClient connection configuration
     myAWSIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
     myAWSIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
     myAWSIoTMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
-    myAWSIoTMQTTClient.configureConnectDisconnectTimeout(10)  # 10 sec
-    myAWSIoTMQTTClient.configureMQTTOperationTimeout(10)  # 10 sec
-    myAWSIoTMQTTClient.connect()
-    print ("AWS IoT Connected")
+    myAWSIoTMQTTClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
+    myAWSIoTMQTTClient.configureMQTTOperationTimeout(cfgTimeoutSec)
+
+    for attempt in range(1, cfgRetryLimit):
+        try:
+            myAWSIoTMQTTClient.connect()
+            print ("AWS IoT Connected")
+        except connectTimeoutException:
+            continue
+        break
 
     # Shadow config
     myShadowClient.configureAutoReconnectBackoffTime(1, 32, 20)
-    myShadowClient.configureConnectDisconnectTimeout(10)  # 10 sec
-    myShadowClient.configureMQTTOperationTimeout(10)  # 10 sec
-    myShadowClient.connect()
-    myDeviceShadow = myShadowClient.createShadowHandlerWithName(myClientID, True)
+    myShadowClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
+    myShadowClient.configureMQTTOperationTimeout(cfgTimeoutSec)
+
+    for attempt in range(1, cfgRetryLimit):
+        try:
+            myShadowClient.connect()
+            print ("AWS IoT Shadow Topic Subscribed")
+        except connectTimeoutException:
+            continue
+        break
+
+    myDeviceShadow = myShadowClient.createShadowHandlerWithName(cfgThingName, True)
     myDeviceShadow.shadowRegisterDeltaCallback(myShadowCallbackDelta)
-    print ("AWS IoT Shadow Topic Subscribed")
-    
-    cmdTopic = "cmd/windfarm/turbine/" + myClientID + "/#"
+
+    cmdTopic = str("cmd/windfarm/turbine/" + cfgThingName + "/#")
     myAWSIoTMQTTClient.subscribe(cmdTopic, 1, customCallbackCmd)
     print ("AWS IoT Command Topic Subscribed: " + cmdTopic)
 
 def init_turbine_GPIO():                    # initialize GPIO
-    global turbine_rotation_sensor_pin
     GPIO.setwarnings(False)
     GPIO.setup(turbine_rotation_sensor_pin, GPIO.IN, GPIO.PUD_UP)
-    print ("Turbine is connected")
+    print ("Turbine rotation sensor is connected")
 
 def init_turbine_brake():
-    #global myDeviceShadow
-    #myDeviceShadow.shadowDelete(myShadowCallback, 5)
     request_turbine_brake_action("OFF")
     turbine_brake_action("OFF")
 
@@ -150,7 +173,7 @@ def calculate_turbine_elapse(channel):      # callback function
     start_timer = time.time()               # let current time equals to start_timer
 
 def calculate_turbine_speed():
-    global pulse,elapse,rpm,last_pulse
+    global rpm,last_pulse
     if elapse !=0:   # to avoid DivisionByZero error
         rpm = 1/elapse * 60
     if pulse == last_pulse:
@@ -161,28 +184,30 @@ def calculate_turbine_speed():
 
 def calibrate_turbine_vibe():
     global accel_x_cal, accel_y_cal, accel_z_cal
-    # Read the X, Y, Z axis acceleration values and print them.
+    # Read the X, Y, Z axis acceleration values
     accel = accelerometer.get_accel_data()
     accel_x = accel["x"]
     accel_y = accel["y"]
-    accel_z = accel["z"] 
+    accel_z = accel["z"]
     print('Vibration calibration: '+ str(accel_x) + ' ' + str(accel_y) + ' ' + str(accel_z))
-    # Grab the X, Y, Z components from the reading and print them out.
+
+    # Assign to the calibration variable set
     accel_x_cal = accel["x"]
     accel_y_cal = accel["y"]
-    accel_z_cal = accel["z"] 
+    accel_z_cal = accel["z"]
+
     return 1
 
 def calculate_turbine_vibe():
-    global accel_x, accel_y, accel_z, accel_x_cal, accel_y_cal, accel_z_cal
+    global accel_x, accel_y, accel_z
     # Read the X, Y, Z axis acceleration values and print them.
     accel = accelerometer.get_accel_data()
-    
+
     # Grab the X, Y, Z components from the reading and print them out.
     accel_x = accel["x"]
     accel_y = accel["y"]
-    accel_z = accel["z"]  
-    
+    accel_z = accel["z"]
+
     # Apply calibration offsets
     accel_x -= accel_x_cal
     accel_y -= accel_y_cal
@@ -190,14 +215,13 @@ def calculate_turbine_vibe():
     return 1
 
 def get_turbine_voltage():
-    global mcp
     # The read_adc function will get the value of the specified channel (0-7).
     refVal = mcp.read_adc(0)
     calcVolt = round(((3300/1023) * refVal) / 1000, 2)
     return calcVolt
 
 def turbine_brake_action(action):
-    global brakePWM,brake_state,myDeviceShadow,LED_LAST_STATE,myBrakePosPWM,FullBrakeOnPosPWM,FullBrakeOffPosPWM
+    global brakePWM,brake_state,myDeviceShadow,LED_LAST_STATE,myBrakePosPWM
     if action == brake_state:
         return "Already there"
 
@@ -206,8 +230,8 @@ def turbine_brake_action(action):
         RGBLED.whiteOff()
         RGBLED.redOn()
         LED_LAST_STATE = "Red"
-        myBrakePosPWM = FullBrakeOnPosPWM 
-        brakePWM.ChangeDutyCycle(myBrakePosPWM) 
+        myBrakePosPWM = cfgBrakeOnPosition
+        brakePWM.ChangeDutyCycle(myBrakePosPWM)
         sleep(3)
         brakePWM.ChangeDutyCycle(0)
 
@@ -216,7 +240,7 @@ def turbine_brake_action(action):
         RGBLED.whiteOff()
         RGBLED.greenOn()
         LED_LAST_STATE = "Green"
-        myBrakePosPWM = FullBrakeOffPosPWM 
+        myBrakePosPWM = cfgBrakeOffPosition
         brakePWM.ChangeDutyCycle(myBrakePosPWM)
         sleep(1)
         brakePWM.ChangeDutyCycle(0)
@@ -250,33 +274,36 @@ def turbine_brake_action(action):
 
 
 def turbine_brake_change (newPWMval,newActionDurSec,newReturnToOff):
-    global brakePWM,brake_state,LED_LAST_STATE,FullBrakeOffPosPWM
+    global brakePWM,brake_state,LED_LAST_STATE
     RGBLED.whiteOff()
-    if newPWMval == FullBrakeOffPosPWM:
+    if newPWMval == cfgBrakeOffPosition:
         RGBLED.magentaOff()
         RGBLED.greenOn()
         LED_LAST_STATE = "Green"
     else:
         RGBLED.magentaOn()
-        LED_LAST_STATE = "Magenta" 
+        LED_LAST_STATE = "Magenta"
+
     brakePWM.ChangeDutyCycle(newPWMval)
+
     if newActionDurSec == None:
         sleep(1)
     else:
         sleep(newActionDurSec)
-    
+
     if newReturnToOff:
         #return to off position and then stop
-        brakePWM.ChangeDutyCycle(FullBrakeOffPosPWM)
+        brakePWM.ChangeDutyCycle(cfgBrakeOffPosition)
         sleep(0.5)
         brakePWM.ChangeDutyCycle(0)
     else:
-        #remove brake pressure after specified duration 
+        #remove brake pressure after specified duration
         brakePWM.ChangeDutyCycle(0)
 
     RGBLED.magentaOff()
     RGBLED.greenOn()
     LED_LAST_STATE = "Green"
+
 
 def request_turbine_brake_action(action):
     global myDeviceShadow,LED_LAST_STATE
@@ -318,6 +345,7 @@ def request_turbine_brake_action(action):
 
     return new_brake_state
 
+
 def process_data_path_changes(param,value):
     global myDeviceShadow
 
@@ -344,14 +372,16 @@ def process_data_path_changes(param,value):
 
     return value
 
+
 def init_turbine_interrupt():
     GPIO.add_event_detect(turbine_rotation_sensor_pin, GPIO.FALLING, callback = calculate_turbine_elapse, bouncetime = 20)
 
+
 def myShadowCallbackDelta(payload, responseStatus, token):
-    global myClientID,myDataSendMode,myDataInterval
+    global cfgThingName,myDataSendMode,myDataInterval
     print ("delta shadow callback >> " + payload)
 
-    if responseStatus == "delta/" + myClientID:
+    if responseStatus == "delta/" + cfgThingName:
         payloadDict = json.loads(payload)
         print ("shadow delta >> " + payload)
         try:
@@ -375,10 +405,10 @@ def myShadowCallback(payload, responseStatus, token):
         print("Update request " + token + " rejected!")
 
 def customCallbackCmd(client, userdata, message):
-    global myClientID,myDataSendMode,myDataInterval,myBrakePosPWM
-    if message.topic == "cmd/windfarm/turbine/" + myClientID + "/brake":
+    global cfgThingName,myDataSendMode,myDataInterval,myBrakePosPWM
+    if message.topic == "cmd/windfarm/turbine/" + cfgThingName + "/brake":
         payloadDict = json.loads(message.payload)
-        try: 
+        try:
             myBrakePosPWM = float(payloadDict["pwm_value"])
             myBrakeActionDurSec = None
             if "duration_sec" in payloadDict:
@@ -389,29 +419,31 @@ def customCallbackCmd(client, userdata, message):
             if "return_to_off" in payloadDict:
                 myRet2Off = bool(payloadDict["return_to_off"])
             else:
-                myRet2Off = True 
+                myRet2Off = True
 
             if "duration_sec" in payloadDict:
                 myDurSec = int(payloadDict["duration_sec"])
                 print ("Brake change >> " + str(myBrakePosPWM) + " with duration of " + str(myDurSec) + " seconds")
             else:
                 myDurSec = 1
-                print ("Brake change >> " + str(myBrakePosPWM) + " with duration of 1 second") 
-            
+                print ("Brake change >> " + str(myBrakePosPWM) + " with duration of 1 second")
+
             turbine_brake_change(myBrakePosPWM, myBrakeActionDurSec, myRet2Off)
-      
+
         except:
             print ("brake change failed")
 
 
 def main():
-    global myClientID,rpm,pulse,myAWSIoTMQTTClient,myShadowClient,myDeviceShadow,myDataSendMode,myDataInterval,LED_LAST_STATE,myBrakePosPWM
+    global rpm,pulse,myAWSIoTMQTTClient,myShadowClient,myDeviceShadow,myDataSendMode,myDataInterval,LED_LAST_STATE,myBrakePosPWM
+    print ("AWS IoT Wind Energy Turbine Program")
+    print("DeviceID: " + myUUID)
+    print("ThingName: " + cfgThingName)
     RGBLED.whiteOff()
     RGBLED.blueOn()
     my_loop_cnt = 0
     data_sample_cnt = 0
     last_reported_speed = -1
-    myDataIntervalCnt = 50 
     myVibeDataList = []
 
     try:
@@ -436,13 +468,12 @@ def main():
             peak_vibe_y = 0
             peak_vibe_z = 0
             del myVibeDataList[:]
-            myDataIntervalCnt = 50
 
             #sampling of vibration between published messages
-            for data_sample_cnt in range(myDataIntervalCnt, 0, -1):
+            for data_sample_cnt in range(cfgVibeDataSampleCnt, 0, -1):
                 calculate_turbine_vibe()
                 vibe = math.sqrt(accel_x ** 2 + accel_y ** 2 + accel_z ** 2)
-                
+
                 #store the peak vibration value
                 peak_vibe = max(peak_vibe, vibe)
                 myVibeDataList.append(vibe)
@@ -456,7 +487,7 @@ def main():
 
             avg_vibe = sum(myVibeDataList) / len(myVibeDataList)
             myReport = {
-                'thing_name' : myClientID,
+                'thing_name' : cfgThingName,
                 'deviceID' : myUUID,
                 'timestamp' : str(datetime.datetime.utcnow().isoformat()),
                 'loop_cnt' : str(my_loop_cnt),
@@ -469,13 +500,13 @@ def main():
                 'turbine_vibe_peak': peak_vibe,
                 'turbine_vibe_avg': avg_vibe,
                 'turbine_sample_cnt': str(len(myVibeDataList)),
-                'pwm_value': myBrakePosPWM 
+                'pwm_value': myBrakePosPWM
                 }
 
             try:
                 print('rpm:{0:.0f}-RPM turbine_rev_cnt:{1} peak-vibe:{2} avg-vibe:{6} brake_pwm:{3} loop_cnt:{4} voltage:{5}'.format(rpm,pulse,peak_vibe,str(myBrakePosPWM),str(my_loop_cnt),str(get_turbine_voltage()),str(avg_vibe)) )
                 if rpm > 0 or last_reported_speed != 0:
-                     myTopic = "dt/windfarm/turbine/" + myClientID
+                     myTopic = "dt/windfarm/turbine/" + cfgThingName
                      last_reported_speed = rpm
                      RGBLED.whiteOff()
                      myAWSIoTMQTTClient.publish(myTopic, json.dumps(myReport), 0)
@@ -502,79 +533,49 @@ if __name__ == "__main__":
     # Usage
     usageInfo = """Usage:
 
-    Use certificate based mutual authentication:
-    python someprogram.py -e <endpoint> -r <rootCAFilePath> -c <certFilePath> -k <privateKeyFilePath> -n <your-thingname>
-
-    Use MQTT over WebSocket:
-    python someprogram.py -e <endpoint> -r <rootCAFilePath> -w
-
-    Type "python someprogram.py -h" for available options.
-    """
-    # Help info
-    helpInfo = """-e, --endpoint
-            Your AWS IoT custom endpoint
-    -r, --rootCA
-            Root CA file path
-    -c, --cert
-            Certificate file path
-    -k, --key
-            Private key file path
-    -n, --thingName
-            Unique thing name as created in IoT Core
-    -w, --websocket
-            Use MQTT over WebSocket
-    -h, --help
-            Help information
-
+    python turbine.py -config <config json file>
     """
 
     # Read in command-line parameters
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hwe:k:c:r:n:", ["help", "endpoint=", "key=", "cert=", "rootCA=", "thingName=", "websocket"])
+        opts, args = getopt.getopt(sys.argv[1:], "", ["config="])
         if len(opts) == 0:
             raise getopt.GetoptError("No input parameters!")
         for opt, arg in opts:
-            if opt in ("-h", "--help"):
-                print(helpInfo)
-                exit(0)
-            if opt in ("-e", "--endpoint"):
-                host = arg
-            if opt in ("-r", "--rootCA"):
-                rootCAPath = arg
-            if opt in ("-c", "--cert"):
-                certificatePath = arg
-            if opt in ("-k", "--key"):
-                privateKeyPath = arg
-            if opt in ("-n", "--thingName"):
-                myClientID = arg
-                print("ThingName: " + myClientID)
-            if opt in ("-w", "--websocket"):
-                useWebsocket = True
+            if opt in ("--config"):
+                configFile = arg
+                if os.path.isfile(configFile):
+                    with open(configFile) as f:
+                        myConfig = json.load(f)
+
+                    cfgThingName = myConfig['deviceThing']['thingName']
+                    cfgThingName = cfgThingName.strip()
+
+                    cfgCertsPath = myConfig['certsPath']
+                    cfgCaPath = myConfig['deviceThing']['caPath']
+                    cfgCertPath = myConfig['deviceThing']['certPath']
+                    cfgKeyPath = myConfig['deviceThing']['keyPath']
+                    cfgEndPoint = myConfig['deviceThing']['endPoint']
+                    cfgMqttPort = myConfig['deviceThing']['mqttPort']
+                    cfgTimeoutSec = myConfig['runtime']['connection']['timeoutSec']
+                    cfgRetryLimit = myConfig['runtime']['connection']['retryLimit']
+                    cfgBrakeOnPosition = myConfig['settings']['brakeServo']['onPosition']
+                    cfgBrakeOffPosition = myConfig['settings']['brakeServo']['offPosition']
+                    cfgVibeDataSampleCnt = myConfig['settings']['vibration']['dataSampleCnt']
+
     except getopt.GetoptError:
             print(usageInfo)
             exit(1)
 
     # Missing configuration notification
     missingConfiguration = False
-    if not host:
-        print("Missing '-e' or '--endpoint'")
+    if not configFile:
+        print("Missing '--config' ")
         missingConfiguration = True
-    if not rootCAPath:
-        print("Missing '-r' or '--rootCA'")
-        missingConfiguration = True
-    if not myClientID:
-        print("Missing '-n' or '--thingName'")
-        missingConfiguration = True
-    if not useWebsocket:
-        if not certificatePath:
-            print("Missing '-c' or '--cert'")
-            missingConfiguration = True
-        if not privateKeyPath:
-            print("Missing '-k' or '--key'")
-            missingConfiguration = True
     if missingConfiguration:
         exit(2)
 
     logging.basicConfig(filename='turbine.log',level=logging.INFO,format='%(asctime)s %(message)s')
-    logger.info("Welcome to the AWS Windfarm Turbine Device Reporter.")
+    logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter.")
     main()
+
