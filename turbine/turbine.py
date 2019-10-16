@@ -21,12 +21,13 @@ import time, math
 import datetime
 import json
 import uuid
+import socket
 import getopt, sys
 from random import randint
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTShadowClient
 from mpu6050 import mpu6050
-import rgbled as RGBLED
+import Adafruit_MCP3008
 import math
 
 #configurable settings from the config.json file
@@ -42,22 +43,29 @@ cfgMqttPort = ""
 cfgTimeoutSec = 10
 cfgRetryLimit = 3
 cfgBrakeOnPosition = 6.5
-cfgBrakeOffPosition = 8
+cfgBrakeOffPosition = 7.5
 cfgVibeDataSampleCnt = 50
 
-myUUID = str(uuid.getnode())
+#determine a unique deviceID for this Raspberry PI to be used in the IoT message
+# getnode() - Gets the hardware address as a 48-bit positive integer
+turbineDeviceId = str(uuid.getnode())
 
+#Enable logging
 logger = logging.getLogger(__name__)
-GPIO.setmode(GPIO.BCM)
 
-LED_LAST_STATE = ""
+#Keep track of the safety state
+turbineSafetyState = ""
 
-accelerometer = mpu6050(0x68)
+#Keep track of the desired LED state
+ledLastState = ""
+
+#The accelerometer is used to measure vibration levels
+accelerometer = None
 accel_x = 0
 accel_y = 0
 accel_z = 0
 
-#calibration offsets
+#calibration offsets that account for the initial static position of the accelerometer when idle
 accel_x_cal = 0
 accel_y_cal = 0
 accel_z_cal = 0
@@ -66,44 +74,51 @@ accel_z_cal = 0
 myAWSIoTMQTTClient = None
 myShadowClient = None
 myDeviceShadow = None
-aws_session = None
 myDataSendMode = "normal"
 myDataInterval = 5
 
 #Turbine rotation speed sensor
 turbine_rotation_sensor_pin = 26 #pin 37
-rpm = 0
-elapse = 0
-pulse = 0
-last_pulse = 0
+turbineRPM = 0
+turbineRpmElapse = 0
+turbineRotationCnt = 0
+lastTurbineRotationCnt = 0
 start_timer = time.time()
 
 #Servo control for turbine brake
-cfgBrakeOffPosition = 7.5
 myBrakePosPWM = cfgBrakeOffPosition
-cfgBrakeOnPosition = cfgBrakeOffPosition
 turbine_servo_brake_pin = 15 #pin 10
-GPIO.setwarnings(False)
-GPIO.setup(turbine_servo_brake_pin, GPIO.OUT)
-brakePWM = GPIO.PWM(turbine_servo_brake_pin, 50)
-brake_state = "TBD"
-brakePWM.start(0)
-
-GPIO.setup(21, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
+brakeState = "TBD"
+brakeServo = None
 
 #ADC MCP3008 used to sample the voltage level
-import Adafruit_MCP3008
 CLK  = 11 #pin 23
 MISO = 9  #pin 21
 MOSI = 10 #pin 19
 CS   = 8  #pin 24
-mcp = Adafruit_MCP3008.MCP3008(clk=CLK, cs=CS, miso=MISO, mosi=MOSI)
+adcSensor = None
 
-def aws_connect():
-    # Init AWSIoTMQTTClient
-    global myAWSIoTMQTTClient
-    global myShadowClient
-    global myDeviceShadow
+#RGB LED
+ledRedPin   = 5
+ledGreenPin = 6
+ledBluePin  = 13
+
+def initTurbineGPIO():
+    global GPIO
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    print ("Turbine GPIO initialized")
+
+def initTurbineLED():
+    global GPIO
+    GPIO.setup(ledRedPin, GPIO.OUT)
+    GPIO.setup(ledGreenPin, GPIO.OUT)
+    GPIO.setup(ledBluePin, GPIO.OUT)
+    ledOn("blue")
+    print ("Turbine LED initialized")
+
+def connectTurbineIoT():
+    global myAWSIoTMQTTClient, myShadowClient, myDeviceShadow
 
     ca = cfgCertsPath + '/' + cfgCaPath
     key = cfgCertsPath + '/' + cfgKeyPath
@@ -121,6 +136,7 @@ def aws_connect():
     myAWSIoTMQTTClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
     myAWSIoTMQTTClient.configureMQTTOperationTimeout(cfgTimeoutSec)
 
+    #Attempt to connect
     for attempt in range(1, cfgRetryLimit):
         try:
             myAWSIoTMQTTClient.connect()
@@ -143,48 +159,90 @@ def aws_connect():
         break
 
     myDeviceShadow = myShadowClient.createShadowHandlerWithName(cfgThingName, True)
-    myDeviceShadow.shadowRegisterDeltaCallback(myShadowCallbackDelta)
+    myDeviceShadow.shadowRegisterDeltaCallback(shadowCallbackDelta)
 
+    #Subscribe to the command topics
     cmdTopic = str("cmd/windfarm/turbine/" + cfgThingName + "/#")
     myAWSIoTMQTTClient.subscribe(cmdTopic, 1, customCallbackCmd)
     print ("AWS IoT Command Topic Subscribed: " + cmdTopic)
 
-def init_turbine_GPIO():                    # initialize GPIO
-    GPIO.setwarnings(False)
+def initTurbineRPMSensor():
+    global GPIO
     GPIO.setup(turbine_rotation_sensor_pin, GPIO.IN, GPIO.PUD_UP)
+    GPIO.add_event_detect(turbine_rotation_sensor_pin, GPIO.FALLING, callback = calculateTurbineElapse, bouncetime = 20)
     print ("Turbine rotation sensor is connected")
 
-def init_turbine_brake():
-    request_turbine_brake_action("OFF")
-    turbine_brake_action("OFF")
+def initTurbineButtons():
+    global GPIO
+    #Setup to read 3 button switches
+    GPIO.setup(21, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
+    GPIO.setup(20, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
+    GPIO.setup(16, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
+    print ("Turbine buttons enabled")
 
-def manual_turbine_reset():
-    button_state = GPIO.input(21)
-    if button_state == True:
+def initTurbineVoltageSensor():
+    global adcSensor
+    adcSensor = Adafruit_MCP3008.MCP3008(clk=CLK, cs=CS, miso=MISO, mosi=MOSI)
+    print ("Turbine voltage sensor is connected")
+
+def initTurbineVibeSensor():
+    global accelerometer
+    accelerometer = mpu6050(0x68)
+    print ("Turbine vibration sensor is connected")
+
+def initTurbineBrake():
+    global brakeServo, GPIO
+    GPIO.setup(turbine_servo_brake_pin, GPIO.OUT)
+    brakeServo = GPIO.PWM(turbine_servo_brake_pin, 50)
+    brakeServo.start(0)
+    print ("Turbine brake connected")
+
+def resetTurbineBrake():
+    requestTurbineBrakeAction("OFF")
+    turbineBrakeAction("OFF")
+    print ("Turbine brake reset")
+
+def checkButtons():
+    buttonState = GPIO.input(21) #Switch1 (S1)
+    if buttonState == True:
         print("Manual brake reset event")
-        init_turbine_brake()
-        button_state = False
+        resetTurbineBrake()
+        buttonState = False
 
+    buttonState = GPIO.input(20) #Switch2 (S2)
+    if buttonState == True:
+        print("Set brake on event")
+        if brakeState == False:
+            requestTurbineBrakeAction("ON")
+            turbineBrakeAction("ON")
+        buttonState = False
 
-def calculate_turbine_elapse(channel):      # callback function
-    global pulse, start_timer, elapse
-    pulse+=1                                # increase pulse by 1 whenever interrupt occurred
-    elapse = time.time() - start_timer      # elapse for every 1 complete rotation made!
-    start_timer = time.time()               # let current time equals to start_timer
+    buttonState = GPIO.input(16) #Switch3 (S3)
+    if buttonState == True:
+        print("TBD Button")
+        buttonState = False
 
-def calculate_turbine_speed():
-    global rpm,last_pulse
-    if elapse !=0:   # to avoid DivisionByZero error
-        rpm = 1/elapse * 60
-    if pulse == last_pulse:
-        rpm = 0
+def calculateTurbineElapse(channel):      # callback function
+    global turbineRotationCnt, start_timer, turbineRpmElapse
+    turbineRotationCnt+=1                   # increase cnt by 1 whenever interrupt occurred
+    turbineRpmElapse = time.time() - start_timer      # time elapsed for every 1 complete rotation
+    start_timer = time.time()               # let current time equal to start_timer
+
+def calculateTurbineSpeed():
+    global turbineRPM, lastTurbineRotationCnt
+    if turbineRpmElapse !=0:   # to avoid DivisionByZero error
+        turbineRPM = 1/turbineRpmElapse * 60
+    if turbineRotationCnt == lastTurbineRotationCnt:
+        turbineRPM = 0
     else:
-        last_pulse = pulse
-    return rpm
+        lastTurbineRotationCnt = turbineRotationCnt
+    return turbineRPM
 
-def calibrate_turbine_vibe():
+def calibrateTurbineVibeSensor():
     global accel_x_cal, accel_y_cal, accel_z_cal
     # Read the X, Y, Z axis acceleration values
+    print("Keep the turbine stationary for calibration...")
+
     accel = accelerometer.get_accel_data()
     accel_x = accel["x"]
     accel_y = accel["y"]
@@ -195,15 +253,14 @@ def calibrate_turbine_vibe():
     accel_x_cal = accel["x"]
     accel_y_cal = accel["y"]
     accel_z_cal = accel["z"]
-
     return 1
 
-def calculate_turbine_vibe():
+def calculateTurbineVibe():
     global accel_x, accel_y, accel_z
-    # Read the X, Y, Z axis acceleration values and print them.
+    # Read the X, Y, Z axis acceleration values
     accel = accelerometer.get_accel_data()
 
-    # Grab the X, Y, Z components from the reading and print them out.
+    # Grab the X, Y, Z vales
     accel_x = accel["x"]
     accel_y = accel["y"]
     accel_z = accel["z"]
@@ -214,45 +271,52 @@ def calculate_turbine_vibe():
     accel_z -= accel_z_cal
     return 1
 
-def get_turbine_voltage():
+def getTurbineVoltage(channel):
     # The read_adc function will get the value of the specified channel (0-7).
-    refVal = mcp.read_adc(0)
+    refVal = adcSensor.read_adc(channel)
     calcVolt = round(((3300/1023) * refVal) / 1000, 2)
     return calcVolt
 
-def turbine_brake_action(action):
-    global brakePWM,brake_state,myDeviceShadow,LED_LAST_STATE,myBrakePosPWM
-    if action == brake_state:
+def getIp():
+    IP = '0.0.0.0'
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # doesn't even have to be reachable
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+    except:
+        (IP == '127.0.0.1') | (IP == '127.0.1.1')
+    finally:
+        s.close()
+    return IP
+
+def turbineBrakeAction(action):
+    global brakeServo, brakeState, myDeviceShadow, myBrakePosPWM
+    if action == brakeState:
         return "Already there"
 
     if action == "ON":
         print ("Applying turbine brake!")
-        RGBLED.whiteOff()
-        RGBLED.redOn()
-        LED_LAST_STATE = "Red"
         myBrakePosPWM = cfgBrakeOnPosition
-        brakePWM.ChangeDutyCycle(myBrakePosPWM)
+        brakeServo.ChangeDutyCycle(myBrakePosPWM)
         sleep(3)
-        brakePWM.ChangeDutyCycle(0)
+        brakeServo.ChangeDutyCycle(0)
 
     elif action == "OFF":
         print ("Resetting turbine brake.")
-        RGBLED.whiteOff()
-        RGBLED.greenOn()
-        LED_LAST_STATE = "Green"
         myBrakePosPWM = cfgBrakeOffPosition
-        brakePWM.ChangeDutyCycle(myBrakePosPWM)
+        brakeServo.ChangeDutyCycle(myBrakePosPWM)
         sleep(1)
-        brakePWM.ChangeDutyCycle(0)
+        brakeServo.ChangeDutyCycle(0)
 
     else:
         return "NOT AN ACTION"
-    brake_state = action
+    brakeState = action
 
     shadow_payload = {
             "state": {
                 "reported": {
-                    "brake_status": brake_state
+                    "brake_status": brakeState
                 }
             }
         }
@@ -261,7 +325,7 @@ def turbine_brake_action(action):
     try_cnt = 0
     while still_trying:
         try:
-            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), myShadowCallback, 5)
+            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), shadowCallback, 5)
             still_trying = False
         except:
             try_cnt += 1
@@ -270,21 +334,12 @@ def turbine_brake_action(action):
             if try_cnt > 10:
                 still_trying = False
 
-    return brake_state
+    return brakeState
 
 
-def turbine_brake_change (newPWMval,newActionDurSec,newReturnToOff):
-    global brakePWM,brake_state,LED_LAST_STATE
-    RGBLED.whiteOff()
-    if newPWMval == cfgBrakeOffPosition:
-        RGBLED.magentaOff()
-        RGBLED.greenOn()
-        LED_LAST_STATE = "Green"
-    else:
-        RGBLED.magentaOn()
-        LED_LAST_STATE = "Magenta"
-
-    brakePWM.ChangeDutyCycle(newPWMval)
+def turbineBrakeChange (newPWMval,newActionDurSec,newReturnToOff):
+    global brakeServo, brakeState
+    brakeServo.ChangeDutyCycle(newPWMval)
 
     if newActionDurSec == None:
         sleep(1)
@@ -293,40 +348,22 @@ def turbine_brake_change (newPWMval,newActionDurSec,newReturnToOff):
 
     if newReturnToOff:
         #return to off position and then stop
-        brakePWM.ChangeDutyCycle(cfgBrakeOffPosition)
+        brakeServo.ChangeDutyCycle(cfgBrakeOffPosition)
         sleep(0.5)
-        brakePWM.ChangeDutyCycle(0)
+        brakeServo.ChangeDutyCycle(0)
     else:
         #remove brake pressure after specified duration
-        brakePWM.ChangeDutyCycle(0)
-
-    RGBLED.magentaOff()
-    RGBLED.greenOn()
-    LED_LAST_STATE = "Green"
+        brakeServo.ChangeDutyCycle(0)
 
 
-def request_turbine_brake_action(action):
-    global myDeviceShadow,LED_LAST_STATE
-
-    if action == "ON":
-        RGBLED.whiteOff()
-        RGBLED.redOn()
-        LED_LAST_STATE = "Red"
-        pass
-    elif action == "OFF":
-        RGBLED.whiteOff()
-        RGBLED.greenOn()
-        LED_LAST_STATE = "Green"
-        pass
-    else:
-        return "NOT AN ACTION"
-
-    new_brake_state = action
+def requestTurbineBrakeAction(action):
+    global myDeviceShadow
+    new_brakeState = action
 
     shadow_payload = {
             "state": {
                 "desired": {
-                    "brake_status": new_brake_state
+                    "brake_status": new_brakeState
                 }
             }
         }
@@ -335,18 +372,18 @@ def request_turbine_brake_action(action):
     try_cnt = 0
     while still_trying:
         try:
-            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), myShadowCallback, 5)
+            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), shadowCallback, 5)
             still_trying = False
         except:
             try_cnt += 1
             sleep(1)
-            if try_cnt > 10:
+            if try_cnt > cfgRetryLimit:
                 still_trying = False
 
-    return new_brake_state
+    return new_brakeState
 
 
-def process_data_path_changes(param,value):
+def processDataPathChanges(param,value):
     global myDeviceShadow
 
     shadow_payload = {
@@ -361,7 +398,7 @@ def process_data_path_changes(param,value):
     try_cnt = 0
     while still_trying:
         try:
-            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), myShadowCallback, 5)
+            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), shadowCallback, 5)
             still_trying = False
         except:
             try_cnt += 1
@@ -372,13 +409,8 @@ def process_data_path_changes(param,value):
 
     return value
 
-
-def init_turbine_interrupt():
-    GPIO.add_event_detect(turbine_rotation_sensor_pin, GPIO.FALLING, callback = calculate_turbine_elapse, bouncetime = 20)
-
-
-def myShadowCallbackDelta(payload, responseStatus, token):
-    global cfgThingName,myDataSendMode,myDataInterval
+def shadowCallbackDelta(payload, responseStatus, token):
+    global myDataSendMode, myDataInterval
     print ("delta shadow callback >> " + payload)
 
     if responseStatus == "delta/" + cfgThingName:
@@ -386,15 +418,15 @@ def myShadowCallbackDelta(payload, responseStatus, token):
         print ("shadow delta >> " + payload)
         try:
             if "brake_status" in payloadDict["state"]:
-                 turbine_brake_action(payloadDict["state"]["brake_status"])
+                 turbineBrakeAction(payloadDict["state"]["brake_status"])
             if "data_path" in payloadDict["state"]:
-                 myDataSendMode = process_data_path_changes("data_path", payloadDict["state"]["data_path"])
+                 myDataSendMode = processDataPathChanges("data_path", payloadDict["state"]["data_path"])
             if "data_fast_interval" in payloadDict["state"]:
-                 myDataInterval = int(process_data_path_changes("data_fast_interval", payloadDict["state"]["data_fast_interval"]))
+                 myDataInterval = int(processDataPathChanges("data_fast_interval", payloadDict["state"]["data_fast_interval"]))
         except:
             print ("delta cb error")
 
-def myShadowCallback(payload, responseStatus, token):
+def shadowCallback(payload, responseStatus, token):
     if responseStatus == "timeout":
         print("Update request " + token + " time out!")
 
@@ -405,7 +437,8 @@ def myShadowCallback(payload, responseStatus, token):
         print("Update request " + token + " rejected!")
 
 def customCallbackCmd(client, userdata, message):
-    global cfgThingName,myDataSendMode,myDataInterval,myBrakePosPWM
+    global myBrakePosPWM
+
     if message.topic == "cmd/windfarm/turbine/" + cfgThingName + "/brake":
         payloadDict = json.loads(message.payload)
         try:
@@ -428,102 +461,193 @@ def customCallbackCmd(client, userdata, message):
                 myDurSec = 1
                 print ("Brake change >> " + str(myBrakePosPWM) + " with duration of 1 second")
 
-            turbine_brake_change(myBrakePosPWM, myBrakeActionDurSec, myRet2Off)
+            turbineBrakeChange(myBrakePosPWM, myBrakeActionDurSec, myRet2Off)
 
         except:
             print ("brake change failed")
 
+def determineTurbineSafetyState(vibe, vibeLimit=5):
+    global turbineSafetyState
+    if vibe > vibeLimit:
+        turbineSafetyState = 'unsafe'
+        ledOn("red")
+    elif vibe > (vibeLimit * 0.8):
+        turbineSafetyState = 'warning'
+        ledOn("magenta")
+    else:
+        turbineSafetyState = 'safe'
+        ledOn("green")
+
+def ledOn(color=None):
+    global ledLastState, GPIO
+    #reset by turning off all 3 colors
+    GPIO.output(ledRedPin, 0)
+    GPIO.output(ledGreenPin, 0)
+    GPIO.output(ledBluePin, 0)
+
+    if color == None:
+        color = ledLastState
+    else:
+        ledLastState = color
+
+    if   color == "red":
+        GPIO.output(ledRedPin, 1)
+    elif color == "green":
+        GPIO.output(ledGreenPin, 1)
+    elif color == "blue":
+        GPIO.output(ledBluePin, 1)
+    elif color == "magenta":
+        GPIO.output(ledRedPin, 1)
+        GPIO.output(ledBluePin, 1)
+    elif color == "white":
+        GPIO.output(ledRedPin, 1)
+        GPIO.output(ledGreenPin, 1)
+        GPIO.output(ledBluePin, 1)
+    else:
+        pass
+
+def ledOff(remember=None):
+    global ledLastState, GPIO
+    #reset by turning off all 3 colors
+    GPIO.output(ledRedPin, 0)
+    GPIO.output(ledGreenPin, 0)
+    GPIO.output(ledBluePin, 0)
+
+    if remember == None:
+        ledLastState = ''
+
+def ledFlash(mode='off-on', duration=None):
+    if mode == 'on-off':
+        ledOn()
+        if duration == None:
+            sleep(0.08)
+        else:
+            sleep(duration)
+        ledOff(ledLastState)
+    else:  #off-on
+        ledOff(ledLastState)
+        if duration == None:
+            sleep(0.08)
+        else:
+            sleep(duration)
+        ledOn()
 
 def main():
-    global rpm,pulse,myAWSIoTMQTTClient,myShadowClient,myDeviceShadow,myDataSendMode,myDataInterval,LED_LAST_STATE,myBrakePosPWM
     print ("AWS IoT Wind Energy Turbine Program")
-    print("DeviceID: " + myUUID)
+    print("DeviceID: " + turbineDeviceId)
     print("ThingName: " + cfgThingName)
-    RGBLED.whiteOff()
-    RGBLED.blueOn()
-    my_loop_cnt = 0
-    data_sample_cnt = 0
-    last_reported_speed = -1
-    myVibeDataList = []
+    loopCnt = 0
+    dataSampleCnt = 0
+    lastReportedSpeed = -1
+    vibeDataList = []
 
     try:
-        aws_connect()
-        init_turbine_GPIO()
-        init_turbine_interrupt()
-        sleep(3)
-        init_turbine_brake()
-        print("Keep the turbine stationary for calibration.")
-        calibrate_turbine_vibe()
-        print("Turbine Monitoring Starting...")
-        RGBLED.whiteOff()
-        RGBLED.greenOn()
-        LED_LAST_STATE = "Green"
+        initTurbineGPIO()
+        initTurbineLED()
+        initTurbineRPMSensor()
+        initTurbineVoltageSensor()
+        initTurbineButtons()
+        initTurbineVibeSensor()
+        calibrateTurbineVibeSensor()
+
+        connectTurbineIoT()
+        initTurbineBrake()
+        resetTurbineBrake()
+
+        print("Starting turbine monitoring...")
 
         while True:
-            calculate_turbine_speed()
-            my_loop_cnt += 1
-            peak_vibe = 0
-            vibe = 0
-            peak_vibe_x = 0
-            peak_vibe_y = 0
-            peak_vibe_z = 0
-            del myVibeDataList[:]
+            calculateTurbineSpeed()
+            loopCnt += 1
+            peakVibe = 0
+            currentVibe = 0
+            peakVibe_x = 0
+            peakVibe_y = 0
+            peakVibe_z = 0
+            del vibeDataList[:]
 
             #sampling of vibration between published messages
-            for data_sample_cnt in range(cfgVibeDataSampleCnt, 0, -1):
-                calculate_turbine_vibe()
-                vibe = math.sqrt(accel_x ** 2 + accel_y ** 2 + accel_z ** 2)
+            for dataSampleCnt in range(cfgVibeDataSampleCnt, 0, -1):
+                calculateTurbineVibe()
+                currentVibe = math.sqrt(accel_x ** 2 + accel_y ** 2 + accel_z ** 2)
 
                 #store the peak vibration value
-                peak_vibe = max(peak_vibe, vibe)
-                myVibeDataList.append(vibe)
-                peak_vibe_x = max(peak_vibe_x, abs(accel_x))
-                peak_vibe_y = max(peak_vibe_y, abs(accel_y))
-                peak_vibe_z = max(peak_vibe_z, abs(accel_z))
+                peakVibe = max(peakVibe, currentVibe)
+                vibeDataList.append(currentVibe)
+                peakVibe_x = max(peakVibe_x, abs(accel_x))
+                peakVibe_y = max(peakVibe_y, abs(accel_y))
+                peakVibe_z = max(peakVibe_z, abs(accel_z))
 
-                #check for a manual reset using the button
-                manual_turbine_reset()
+                #check for a button press events
+                checkButtons()
                 sleep(0.1)
 
-            avg_vibe = sum(myVibeDataList) / len(myVibeDataList)
-            myReport = {
+            avgVibe = sum(vibeDataList) / len(vibeDataList)
+            determineTurbineSafetyState(peakVibe)
+            turbineVoltage = getTurbineVoltage(0)  #channel 0 of the ADC
+
+            devicePayload = {
                 'thing_name' : cfgThingName,
-                'deviceID' : myUUID,
+                'deviceID' : turbineDeviceId,
                 'timestamp' : str(datetime.datetime.utcnow().isoformat()),
-                'loop_cnt' : str(my_loop_cnt),
-                'turbine_speed' : rpm,
-                'turbine_rev_cnt' : pulse,
-                'turbine_voltage' : str(get_turbine_voltage()),
-                'turbine_vibe_x' : peak_vibe_x,
-                'turbine_vibe_y' : peak_vibe_y,
-                'turbine_vibe_z' : peak_vibe_z,
-                'turbine_vibe_peak': peak_vibe,
-                'turbine_vibe_avg': avg_vibe,
-                'turbine_sample_cnt': str(len(myVibeDataList)),
+                'loop_cnt' : str(loopCnt),
+                'turbine_speed' : turbineRPM,
+                'turbine_rev_cnt' : turbineRotationCnt,
+                'turbine_voltage' : str(turbineVoltage),
+                'turbine_vibe_x' : peakVibe_x,
+                'turbine_vibe_y' : peakVibe_y,
+                'turbine_vibe_z' : peakVibe_z,
+                'turbine_vibe_peak': peakVibe,
+                'turbine_vibe_avg': avgVibe,
+                'turbine_sample_cnt': str(len(vibeDataList)),
                 'pwm_value': myBrakePosPWM
                 }
 
             try:
-                print('rpm:{0:.0f}-RPM turbine_rev_cnt:{1} peak-vibe:{2} avg-vibe:{6} brake_pwm:{3} loop_cnt:{4} voltage:{5}'.format(rpm,pulse,peak_vibe,str(myBrakePosPWM),str(my_loop_cnt),str(get_turbine_voltage()),str(avg_vibe)) )
-                if rpm > 0 or last_reported_speed != 0:
-                     myTopic = "dt/windfarm/turbine/" + cfgThingName
-                     last_reported_speed = rpm
-                     RGBLED.whiteOff()
-                     myAWSIoTMQTTClient.publish(myTopic, json.dumps(myReport), 0)
-                     sleep(0.08)
-                     if LED_LAST_STATE == "Red":
-                         RGBLED.redOn()
-                     if LED_LAST_STATE == "Magenta":
-                         RGBLED.magentaOn()
-                     else:
-                         RGBLED.greenOn()
+                deviceMsg = (
+                    'Speed:{0:.0f}-RPM '
+                    'Voltage:{1:.3f} '
+                    'Rotations:{2} '
+                    'Peak-Vibe:{3:.3f} '
+                    'Avg-Vibe:{4:.3f} '
+                    'Brake-PWM:{5} '
+                    'LoopCnt:{6} '
+                ).format(
+                    turbineRPM,
+                    turbineVoltage,
+                    turbineRotationCnt,
+                    peakVibe,
+                    avgVibe,
+                    myBrakePosPWM,
+                    loopCnt
+                    )
+                print(deviceMsg)
+
+                #Only publish data if the turbine is spinning
+                if turbineRPM > 0 or lastReportedSpeed != 0:
+                    if myDataSendMode == "faster":
+                        #faster method is for use with Greengrass to Kinesis
+                        publishTopic = "dt/windfarm/turbine/" + cfgThingName + "/faster"
+                    elif myDataSendMode == "cheaper":
+                        #cheaper method is for use with IoT Core Basic Ingest
+                        #It publishes directly to the IoT Rule
+                        publishTopic = "$aws/rules/EnrichWithShadow"
+                    else:
+                        publishTopic = "dt/windfarm/turbine/" + cfgThingName
+
+                    lastReportedSpeed = turbineRPM
+
+                    #publish with QOS 0
+                    myAWSIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
+                    ledFlash()
+
             except:
                 logger.warning("exception while publishing")
                 raise
 
     except (KeyboardInterrupt, SystemExit): #when you press ctrl+c
         print("Disconnecting AWS IoT")
-        RGBLED.whiteOff()
+        ledOff()
         myShadowClient.disconnect()
         sleep(2)
         print("Done.\nExiting.")
