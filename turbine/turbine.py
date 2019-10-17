@@ -61,21 +61,21 @@ ledLastState = ""
 
 #The accelerometer is used to measure vibration levels
 accelerometer = None
-accel_x = 0
-accel_y = 0
-accel_z = 0
+accelX = 0
+accelY = 0
+accelZ = 0
 
 #calibration offsets that account for the initial static position of the accelerometer when idle
-accel_x_cal = 0
-accel_y_cal = 0
-accel_z_cal = 0
+accelXCal = 0
+accelYCal = 0
+accelZCal = 0
 
 #AWS IoT Stuff
-myAWSIoTMQTTClient = None
-myShadowClient = None
-myDeviceShadow = None
-myDataSendMode = "normal"
-myDataInterval = 5
+awsIoTMQTTClient = None
+awsShadowClient = None
+turbineDeviceShadow = None
+dataPublishSendMode = "normal"
+dataPublishInterval = 5
 
 #Turbine rotation speed sensor
 turbine_rotation_sensor_pin = 26 #pin 37
@@ -86,7 +86,7 @@ lastTurbineRotationCnt = 0
 start_timer = time.time()
 
 #Servo control for turbine brake
-myBrakePosPWM = cfgBrakeOffPosition
+turbineBrakePosPWM = cfgBrakeOffPosition
 turbine_servo_brake_pin = 15 #pin 10
 brakeState = "TBD"
 brakeServo = None
@@ -98,7 +98,7 @@ MOSI = 10 #pin 19
 CS   = 8  #pin 24
 adcSensor = None
 
-#RGB LED
+#RGB LED GPIO pins
 ledRedPin   = 5
 ledGreenPin = 6
 ledBluePin  = 13
@@ -118,52 +118,52 @@ def initTurbineLED():
     print ("Turbine LED initialized")
 
 def connectTurbineIoT():
-    global myAWSIoTMQTTClient, myShadowClient, myDeviceShadow
+    global awsIoTMQTTClient, awsShadowClient, turbineDeviceShadow
 
     ca = cfgCertsPath + '/' + cfgCaPath
     key = cfgCertsPath + '/' + cfgKeyPath
     cert = cfgCertsPath + '/' + cfgCertPath
 
-    myShadowClient = AWSIoTMQTTShadowClient(cfgThingName)
-    myShadowClient.configureEndpoint(cfgEndPoint, cfgMqttPort)
-    myShadowClient.configureCredentials(ca, key, cert)
-    myAWSIoTMQTTClient = myShadowClient.getMQTTConnection()
+    awsShadowClient = AWSIoTMQTTShadowClient(cfgThingName)
+    awsShadowClient.configureEndpoint(cfgEndPoint, cfgMqttPort)
+    awsShadowClient.configureCredentials(ca, key, cert)
+    awsIoTMQTTClient = awsShadowClient.getMQTTConnection()
 
     # AWSIoTMQTTClient connection configuration
-    myAWSIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
-    myAWSIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
-    myAWSIoTMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
-    myAWSIoTMQTTClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
-    myAWSIoTMQTTClient.configureMQTTOperationTimeout(cfgTimeoutSec)
+    awsIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
+    awsIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
+    awsIoTMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
+    awsIoTMQTTClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
+    awsIoTMQTTClient.configureMQTTOperationTimeout(cfgTimeoutSec)
 
     #Attempt to connect
     for attempt in range(1, cfgRetryLimit):
         try:
-            myAWSIoTMQTTClient.connect()
-            print ("AWS IoT Connected")
-        except connectTimeoutException:
+            awsIoTMQTTClient.connect()
+            print ("AWS IoT connected")
+        except:
             continue
         break
 
     # Shadow config
-    myShadowClient.configureAutoReconnectBackoffTime(1, 32, 20)
-    myShadowClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
-    myShadowClient.configureMQTTOperationTimeout(cfgTimeoutSec)
+    awsShadowClient.configureAutoReconnectBackoffTime(1, 32, 20)
+    awsShadowClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
+    awsShadowClient.configureMQTTOperationTimeout(cfgTimeoutSec)
 
     for attempt in range(1, cfgRetryLimit):
         try:
-            myShadowClient.connect()
-            print ("AWS IoT Shadow Topic Subscribed")
-        except connectTimeoutException:
+            awsShadowClient.connect()
+            print ("AWS IoT shadow topic subscribed")
+        except:
             continue
         break
 
-    myDeviceShadow = myShadowClient.createShadowHandlerWithName(cfgThingName, True)
-    myDeviceShadow.shadowRegisterDeltaCallback(shadowCallbackDelta)
+    turbineDeviceShadow = awsShadowClient.createShadowHandlerWithName(cfgThingName, True)
+    turbineDeviceShadow.shadowRegisterDeltaCallback(shadowCallbackDelta)
 
     #Subscribe to the command topics
     cmdTopic = str("cmd/windfarm/turbine/" + cfgThingName + "/#")
-    myAWSIoTMQTTClient.subscribe(cmdTopic, 1, customCallbackCmd)
+    awsIoTMQTTClient.subscribe(cmdTopic, 1, customCallbackCmd)
     print ("AWS IoT Command Topic Subscribed: " + cmdTopic)
 
 def initTurbineRPMSensor():
@@ -198,7 +198,7 @@ def initTurbineBrake():
     print ("Turbine brake connected")
 
 def resetTurbineBrake():
-    requestTurbineBrakeAction("OFF")
+    processShadowChange("brake_status", "OFF", "desired")
     turbineBrakeAction("OFF")
     print ("Turbine brake reset")
 
@@ -213,7 +213,7 @@ def checkButtons():
     if buttonState == True:
         print("Set brake on event")
         if brakeState == False:
-            requestTurbineBrakeAction("ON")
+            processShadowChange("brake_status", "ON", "desired")
             turbineBrakeAction("ON")
         buttonState = False
 
@@ -239,36 +239,36 @@ def calculateTurbineSpeed():
     return turbineRPM
 
 def calibrateTurbineVibeSensor():
-    global accel_x_cal, accel_y_cal, accel_z_cal
+    global accelXCal, accelYCal, accelZCal
     # Read the X, Y, Z axis acceleration values
     print("Keep the turbine stationary for calibration...")
 
     accel = accelerometer.get_accel_data()
-    accel_x = accel["x"]
-    accel_y = accel["y"]
-    accel_z = accel["z"]
-    print('Vibration calibration: '+ str(accel_x) + ' ' + str(accel_y) + ' ' + str(accel_z))
+    accelX = accel["x"]
+    accelY = accel["y"]
+    accelZ = accel["z"]
+    print('Vibration calibration: '+ str(accelX) + ' ' + str(accelY) + ' ' + str(accelZ))
 
     # Assign to the calibration variable set
-    accel_x_cal = accel["x"]
-    accel_y_cal = accel["y"]
-    accel_z_cal = accel["z"]
+    accelXCal = accel["x"]
+    accelYCal = accel["y"]
+    accelZCal = accel["z"]
     return 1
 
 def calculateTurbineVibe():
-    global accel_x, accel_y, accel_z
+    global accelX, accelY, accelZ
     # Read the X, Y, Z axis acceleration values
     accel = accelerometer.get_accel_data()
 
     # Grab the X, Y, Z vales
-    accel_x = accel["x"]
-    accel_y = accel["y"]
-    accel_z = accel["z"]
+    accelX = accel["x"]
+    accelY = accel["y"]
+    accelZ = accel["z"]
 
     # Apply calibration offsets
-    accel_x -= accel_x_cal
-    accel_y -= accel_y_cal
-    accel_z -= accel_z_cal
+    accelX -= accelXCal
+    accelY -= accelYCal
+    accelZ -= accelZCal
     return 1
 
 def getTurbineVoltage(channel):
@@ -291,21 +291,21 @@ def getIp():
     return IP
 
 def turbineBrakeAction(action):
-    global brakeServo, brakeState, myDeviceShadow, myBrakePosPWM
+    global brakeServo, brakeState, turbineDeviceShadow, turbineBrakePosPWM
     if action == brakeState:
         return "Already there"
 
     if action == "ON":
         print ("Applying turbine brake!")
-        myBrakePosPWM = cfgBrakeOnPosition
-        brakeServo.ChangeDutyCycle(myBrakePosPWM)
+        turbineBrakePosPWM = cfgBrakeOnPosition
+        brakeServo.ChangeDutyCycle(turbineBrakePosPWM)
         sleep(3)
         brakeServo.ChangeDutyCycle(0)
 
     elif action == "OFF":
         print ("Resetting turbine brake.")
-        myBrakePosPWM = cfgBrakeOffPosition
-        brakeServo.ChangeDutyCycle(myBrakePosPWM)
+        turbineBrakePosPWM = cfgBrakeOffPosition
+        brakeServo.ChangeDutyCycle(turbineBrakePosPWM)
         sleep(1)
         brakeServo.ChangeDutyCycle(0)
 
@@ -313,26 +313,26 @@ def turbineBrakeAction(action):
         return "NOT AN ACTION"
     brakeState = action
 
-    shadow_payload = {
+    shadowPayload = {
             "state": {
                 "reported": {
                     "brake_status": brakeState
                 }
             }
         }
-    #print shadow_payload
-    still_trying = True
-    try_cnt = 0
-    while still_trying:
+    #print shadowPayload
+    stillTrying = True
+    tryCnt = 0
+    while stillTrying:
         try:
-            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), shadowCallback, 5)
-            still_trying = False
+            turbineDeviceShadow.shadowUpdate(json.dumps(shadowPayload).encode("utf-8"), shadowCallback, 5)
+            stillTrying = False
         except:
-            try_cnt += 1
-            print("Try " + str(try_cnt))
+            tryCnt += 1
+            print("Try " + str(tryCnt))
             sleep(1)
-            if try_cnt > 10:
-                still_trying = False
+            if tryCnt > 10:
+                stillTrying = False
 
     return brakeState
 
@@ -356,61 +356,34 @@ def turbineBrakeChange (newPWMval,newActionDurSec,newReturnToOff):
         brakeServo.ChangeDutyCycle(0)
 
 
-def requestTurbineBrakeAction(action):
-    global myDeviceShadow
-    new_brakeState = action
-
-    shadow_payload = {
+#generic procedure to acknowledge shadow changes
+def processShadowChange(param,value,type):
+    global turbineDeviceShadow
+    #type will be either desired or reported
+    shadowPayload = {
             "state": {
-                "desired": {
-                    "brake_status": new_brakeState
-                }
-            }
-        }
-
-    still_trying = True
-    try_cnt = 0
-    while still_trying:
-        try:
-            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), shadowCallback, 5)
-            still_trying = False
-        except:
-            try_cnt += 1
-            sleep(1)
-            if try_cnt > cfgRetryLimit:
-                still_trying = False
-
-    return new_brakeState
-
-
-def processDataPathChanges(param,value):
-    global myDeviceShadow
-
-    shadow_payload = {
-            "state": {
-                "reported": {
+                type: {
                     param: value
                 }
             }
         }
-    #print shadow_payload
-    still_trying = True
-    try_cnt = 0
-    while still_trying:
-        try:
-            myDeviceShadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), shadowCallback, 5)
-            still_trying = False
-        except:
-            try_cnt += 1
-            print("Try " + str(try_cnt))
-            sleep(1)
-            if try_cnt > 10:
-                still_trying = False
 
+    stillTrying = True
+    tryCnt = 0
+    while stillTrying:
+        try:
+            turbineDeviceShadow.shadowUpdate(json.dumps(shadowPayload).encode("utf-8"), shadowCallback, 5)
+            stillTrying = False
+        except:
+            tryCnt += 1
+            print("Try " + str(tryCnt))
+            sleep(1)
+            if tryCnt > 10:
+                stillTrying = False
     return value
 
 def shadowCallbackDelta(payload, responseStatus, token):
-    global myDataSendMode, myDataInterval
+    global dataPublishSendMode, dataPublishInterval, vibe_limit
     print ("delta shadow callback >> " + payload)
 
     if responseStatus == "delta/" + cfgThingName:
@@ -420,9 +393,12 @@ def shadowCallbackDelta(payload, responseStatus, token):
             if "brake_status" in payloadDict["state"]:
                  turbineBrakeAction(payloadDict["state"]["brake_status"])
             if "data_path" in payloadDict["state"]:
-                 myDataSendMode = processDataPathChanges("data_path", payloadDict["state"]["data_path"])
+                 dataPublishSendMode = processShadowChange("data_path", payloadDict["state"]["data_path"], "reported")
             if "data_fast_interval" in payloadDict["state"]:
-                 myDataInterval = int(processDataPathChanges("data_fast_interval", payloadDict["state"]["data_fast_interval"]))
+                 dataPublishInterval = int(processShadowChange("data_fast_interval", payloadDict["state"]["data_fast_interval"]), "reported")
+            if "vibe_limit" in payloadDict["state"]:
+                 vibe_limit = float(payloadDict["state"]["vibe_limit"])
+                 processShadowChange("vibe_limit", vibe_limit, "reported")
         except:
             print ("delta cb error")
 
@@ -437,12 +413,12 @@ def shadowCallback(payload, responseStatus, token):
         print("Update request " + token + " rejected!")
 
 def customCallbackCmd(client, userdata, message):
-    global myBrakePosPWM
+    global turbineBrakePosPWM
 
     if message.topic == "cmd/windfarm/turbine/" + cfgThingName + "/brake":
         payloadDict = json.loads(message.payload)
         try:
-            myBrakePosPWM = float(payloadDict["pwm_value"])
+            turbineBrakePosPWM = float(payloadDict["pwm_value"])
             myBrakeActionDurSec = None
             if "duration_sec" in payloadDict:
                 myDurSec = int(payloadDict["duration_sec"])
@@ -456,12 +432,12 @@ def customCallbackCmd(client, userdata, message):
 
             if "duration_sec" in payloadDict:
                 myDurSec = int(payloadDict["duration_sec"])
-                print ("Brake change >> " + str(myBrakePosPWM) + " with duration of " + str(myDurSec) + " seconds")
+                print ("Brake change >> " + str(turbineBrakePosPWM) + " with duration of " + str(myDurSec) + " seconds")
             else:
                 myDurSec = 1
-                print ("Brake change >> " + str(myBrakePosPWM) + " with duration of 1 second")
+                print ("Brake change >> " + str(turbineBrakePosPWM) + " with duration of 1 second")
 
-            turbineBrakeChange(myBrakePosPWM, myBrakeActionDurSec, myRet2Off)
+            turbineBrakeChange(turbineBrakePosPWM, myBrakeActionDurSec, myRet2Off)
 
         except:
             print ("brake change failed")
@@ -569,14 +545,14 @@ def main():
             #sampling of vibration between published messages
             for dataSampleCnt in range(cfgVibeDataSampleCnt, 0, -1):
                 calculateTurbineVibe()
-                currentVibe = math.sqrt(accel_x ** 2 + accel_y ** 2 + accel_z ** 2)
+                currentVibe = math.sqrt(accelX ** 2 + accelY ** 2 + accelZ ** 2)
 
                 #store the peak vibration value
                 peakVibe = max(peakVibe, currentVibe)
                 vibeDataList.append(currentVibe)
-                peakVibe_x = max(peakVibe_x, abs(accel_x))
-                peakVibe_y = max(peakVibe_y, abs(accel_y))
-                peakVibe_z = max(peakVibe_z, abs(accel_z))
+                peakVibe_x = max(peakVibe_x, abs(accelX))
+                peakVibe_y = max(peakVibe_y, abs(accelY))
+                peakVibe_z = max(peakVibe_z, abs(accelZ))
 
                 #check for a button press events
                 checkButtons()
@@ -600,7 +576,7 @@ def main():
                 'turbine_vibe_peak': peakVibe,
                 'turbine_vibe_avg': avgVibe,
                 'turbine_sample_cnt': str(len(vibeDataList)),
-                'pwm_value': myBrakePosPWM
+                'pwm_value': turbineBrakePosPWM
                 }
 
             try:
@@ -618,17 +594,17 @@ def main():
                     turbineRotationCnt,
                     peakVibe,
                     avgVibe,
-                    myBrakePosPWM,
+                    turbineBrakePosPWM,
                     loopCnt
                     )
                 print(deviceMsg)
 
                 #Only publish data if the turbine is spinning
                 if turbineRPM > 0 or lastReportedSpeed != 0:
-                    if myDataSendMode == "faster":
+                    if dataPublishSendMode == "faster":
                         #faster method is for use with Greengrass to Kinesis
                         publishTopic = "dt/windfarm/turbine/" + cfgThingName + "/faster"
-                    elif myDataSendMode == "cheaper":
+                    elif dataPublishSendMode == "cheaper":
                         #cheaper method is for use with IoT Core Basic Ingest
                         #It publishes directly to the IoT Rule
                         publishTopic = "$aws/rules/EnrichWithShadow"
@@ -638,7 +614,7 @@ def main():
                     lastReportedSpeed = turbineRPM
 
                     #publish with QOS 0
-                    myAWSIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
+                    awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
                     ledFlash()
 
             except:
@@ -648,7 +624,7 @@ def main():
     except (KeyboardInterrupt, SystemExit): #when you press ctrl+c
         print("Disconnecting AWS IoT")
         ledOff()
-        myShadowClient.disconnect()
+        awsShadowClient.disconnect()
         sleep(2)
         print("Done.\nExiting.")
 
