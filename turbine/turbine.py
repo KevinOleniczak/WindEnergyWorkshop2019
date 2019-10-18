@@ -222,6 +222,8 @@ def checkButtons():
         print("TBD Button")
         buttonState = False
 
+    sleep(0.1)
+
 def calculateTurbineElapse(channel):      # callback function
     global turbineRotationCnt, start_timer, turbineRpmElapse
     turbineRotationCnt+=1                   # increase cnt by 1 whenever interrupt occurred
@@ -240,20 +242,37 @@ def calculateTurbineSpeed():
 
 def calibrateTurbineVibeSensor():
     global accelXCal, accelYCal, accelZCal
-    # Read the X, Y, Z axis acceleration values
     print("Keep the turbine stationary for calibration...")
 
-    accel = accelerometer.get_accel_data()
-    accelX = accel["x"]
-    accelY = accel["y"]
-    accelZ = accel["z"]
-    print('Vibration calibration: '+ str(accelX) + ' ' + str(accelY) + ' ' + str(accelZ))
+    #get the speed... since the turbine has just started up, need to wait a bit and take a second reading to get am accurate value
+    speed = calculateTurbineSpeed()
+    sleep(3)
+    speed = calculateTurbineSpeed()
+    while speed > 0:
+        print(">>Please stop the turbine from spinning so the calibration can proceed.")
+        sleep(3)
+        speed = calculateTurbineSpeed()
+
+    accelXList = []
+    accelYList = []
+    accelZList = []
+    #get 20 samples and average them
+    for i in range(1,20):
+        # Read the X, Y, Z axis acceleration values
+        accel = accelerometer.get_accel_data()
+        accelX = accel["x"]
+        accelY = accel["y"]
+        accelZ = accel["z"]
+        accelXList.append(accelX)
+        accelYList.append(accelY)
+        accelZList.append(accelZ)
+        sleep(0.1)
 
     # Assign to the calibration variable set
-    accelXCal = accel["x"]
-    accelYCal = accel["y"]
-    accelZCal = accel["z"]
-    return 1
+    accelXCal = sum(accelXList) / len(accelXList)
+    accelYCal = sum(accelYList) / len(accelYList)
+    accelZCal = sum(accelZList) / len(accelZList)
+    print('Vibration calibration (XYZ): '+ str(accelXCal) + ' ' + str(accelYCal) + ' ' + str(accelZCal))
 
 def calculateTurbineVibe():
     global accelX, accelY, accelZ
@@ -447,7 +466,7 @@ def determineTurbineSafetyState(vibe, vibeLimit=5):
     if vibe > vibeLimit:
         turbineSafetyState = 'unsafe'
         ledOn("red")
-    elif vibe > (vibeLimit * 0.8):
+    elif vibe > (vibeLimit * 0.8): # 80% threshold check
         turbineSafetyState = 'warning'
         ledOn("magenta")
     else:
@@ -556,7 +575,6 @@ def main():
 
                 #check for a button press events
                 checkButtons()
-                sleep(0.1)
 
             avgVibe = sum(vibeDataList) / len(vibeDataList)
             determineTurbineSafetyState(peakVibe)
@@ -599,23 +617,38 @@ def main():
                     )
                 print(deviceMsg)
 
+                #determine the desired topic to publish on
+                if dataPublishSendMode == "faster":
+                    #faster method is for use with Greengrass to Kinesis
+                    publishTopic = "dt/windfarm/turbine/" + cfgThingName + "/faster"
+                elif dataPublishSendMode == "cheaper":
+                    #cheaper method is for use with IoT Core Basic Ingest
+                    #It publishes directly to the IoT Rule
+                    publishTopic = "$aws/rules/EnrichWithShadow"
+                else:
+                    publishTopic = "dt/windfarm/turbine/" + cfgThingName
+
+                #make sure at least a final message is sent when the turbine is stopped
+                lastReportedSpeed = turbineRPM
+
                 #Only publish data if the turbine is spinning
                 if turbineRPM > 0 or lastReportedSpeed != 0:
-                    if dataPublishSendMode == "faster":
-                        #faster method is for use with Greengrass to Kinesis
-                        publishTopic = "dt/windfarm/turbine/" + cfgThingName + "/faster"
-                    elif dataPublishSendMode == "cheaper":
-                        #cheaper method is for use with IoT Core Basic Ingest
-                        #It publishes directly to the IoT Rule
-                        publishTopic = "$aws/rules/EnrichWithShadow"
-                    else:
-                        publishTopic = "dt/windfarm/turbine/" + cfgThingName
-
-                    lastReportedSpeed = turbineRPM
-
                     #publish with QOS 0
                     awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
                     ledFlash()
+                else:
+                    #publish with QOS 0
+                    awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
+                    ledFlash()
+                    print("Turbine is idle... sleeping for 60 seconds")
+                    #sleep a few times with a speed check to see if the turbine is spinning again
+                    for i in range(1,12):
+                        calculateTurbineSpeed()
+                        lastReportedSpeed = turbineRPM
+                        if turbineRPM > 0:
+                            sleep(5)  #need to do this to allow elapse time to grow for a realistic calculation on the next call
+                            break
+                        sleep(5)  #slow down the publishing rate
 
             except:
                 logger.warning("exception while publishing")
