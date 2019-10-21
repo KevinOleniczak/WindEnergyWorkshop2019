@@ -187,8 +187,11 @@ def initTurbineVoltageSensor():
 
 def initTurbineVibeSensor():
     global accelerometer
-    accelerometer = mpu6050(0x68)
-    print ("Turbine vibration sensor is connected")
+    try:
+        accelerometer = mpu6050(0x68)
+        print ("Turbine vibration sensor is connected")
+    except:
+        print("The turbine appears to be disconnected. Please check the connection.")
 
 def initTurbineBrake():
     global brakeServo, GPIO
@@ -240,8 +243,19 @@ def calculateTurbineSpeed():
         lastTurbineRotationCnt = turbineRotationCnt
     return turbineRPM
 
+def checkTurbineVibeSensorAvailable():
+    try:
+        accel = accelerometer.get_accel_data()
+        return True
+    except:
+        return False
+
 def calibrateTurbineVibeSensor():
     global accelXCal, accelYCal, accelZCal
+    if not checkTurbineVibeSensorAvailable():
+        print("The turbine appears to be disconnected. Please check the connection.")
+        return 0
+
     print("Keep the turbine stationary for calibration...")
 
     #get the speed... since the turbine has just started up, need to wait a bit and take a second reading to get am accurate value
@@ -259,13 +273,16 @@ def calibrateTurbineVibeSensor():
     #get 20 samples and average them
     for i in range(1,20):
         # Read the X, Y, Z axis acceleration values
-        accel = accelerometer.get_accel_data()
-        accelX = accel["x"]
-        accelY = accel["y"]
-        accelZ = accel["z"]
-        accelXList.append(accelX)
-        accelYList.append(accelY)
-        accelZList.append(accelZ)
+        try:
+            accel = accelerometer.get_accel_data()
+            accelX = accel["x"]
+            accelY = accel["y"]
+            accelZ = accel["z"]
+            accelXList.append(accelX)
+            accelYList.append(accelY)
+            accelZList.append(accelZ)
+        except:
+            print("The turbine appears to be disconnected. Please check the connection.")
         sleep(0.1)
 
     # Assign to the calibration variable set
@@ -277,18 +294,21 @@ def calibrateTurbineVibeSensor():
 def calculateTurbineVibe():
     global accelX, accelY, accelZ
     # Read the X, Y, Z axis acceleration values
-    accel = accelerometer.get_accel_data()
+    try:
+        accel = accelerometer.get_accel_data()
 
-    # Grab the X, Y, Z vales
-    accelX = accel["x"]
-    accelY = accel["y"]
-    accelZ = accel["z"]
+        # Grab the X, Y, Z vales
+        accelX = accel["x"]
+        accelY = accel["y"]
+        accelZ = accel["z"]
 
-    # Apply calibration offsets
-    accelX -= accelXCal
-    accelY -= accelYCal
-    accelZ -= accelZCal
-    return 1
+        # Apply calibration offsets
+        accelX -= accelXCal
+        accelY -= accelYCal
+        accelZ -= accelZCal
+        return 1
+    except:
+        return 0
 
 def getTurbineVoltage(channel):
     # The read_adc function will get the value of the specified channel (0-7).
@@ -559,25 +579,34 @@ def main():
             peakVibe_x = 0
             peakVibe_y = 0
             peakVibe_z = 0
+            avgVibe = 0
             del vibeDataList[:]
 
             #sampling of vibration between published messages
-            for dataSampleCnt in range(cfgVibeDataSampleCnt, 0, -1):
-                calculateTurbineVibe()
-                currentVibe = math.sqrt(accelX ** 2 + accelY ** 2 + accelZ ** 2)
+            if checkTurbineVibeSensorAvailable():
+                for dataSampleCnt in range(cfgVibeDataSampleCnt, 0, -1):
+                    calculateTurbineVibe()
+                    currentVibe = math.sqrt(accelX ** 2 + accelY ** 2 + accelZ ** 2)
 
-                #store the peak vibration value
-                peakVibe = max(peakVibe, currentVibe)
-                vibeDataList.append(currentVibe)
-                peakVibe_x = max(peakVibe_x, abs(accelX))
-                peakVibe_y = max(peakVibe_y, abs(accelY))
-                peakVibe_z = max(peakVibe_z, abs(accelZ))
+                    #store the peak vibration value
+                    peakVibe = max(peakVibe, currentVibe)
+                    vibeDataList.append(currentVibe)
+                    peakVibe_x = max(peakVibe_x, abs(accelX))
+                    peakVibe_y = max(peakVibe_y, abs(accelY))
+                    peakVibe_z = max(peakVibe_z, abs(accelZ))
 
-                #check for a button press events
-                checkButtons()
+                    #check for a button press events
+                    checkButtons()
 
-            avgVibe = sum(vibeDataList) / len(vibeDataList)
-            determineTurbineSafetyState(peakVibe)
+                if len(vibeDataList) > 0:
+                    avgVibe = sum(vibeDataList) / len(vibeDataList)
+                else:
+                    avgVibe = 0
+
+                determineTurbineSafetyState(peakVibe)
+            else:
+                print("The turbine appears to be disconnected. Please check the connection.")
+                
             turbineVoltage = getTurbineVoltage(0)  #channel 0 of the ADC
 
             devicePayload = {
