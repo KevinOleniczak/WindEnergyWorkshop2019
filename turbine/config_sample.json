@@ -6,7 +6,8 @@
     "keyPath" : "",
     "thingName" : "",
     "endPoint" : "",
-    "mqttPort" : "8883"
+    "mqttPort" : "8883",
+    "ggHost": ""
   },
   "runtime" : {
     "cgroup" : {
@@ -14,7 +15,8 @@
     },
     "connection": {
       "timeoutSec": 10,
-      "retryLimit": 3
+      "retryLimit": 3,
+      "useGreengrass": "no"
     }
   },
   "settings": {

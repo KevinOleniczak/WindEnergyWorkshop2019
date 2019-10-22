@@ -18,7 +18,7 @@ import os.path
 import RPi.GPIO as GPIO
 from time import sleep
 import time, math
-import datetime
+from datetime import datetime
 import json
 import uuid
 import socket
@@ -29,6 +29,8 @@ from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTShadowClient
 from mpu6050 import mpu6050
 import Adafruit_MCP3008
 import math
+from requests import get
+from distutils.util import strtobool
 
 #configurable settings from the config.json file
 configFile = None
@@ -40,8 +42,10 @@ cfgKeyPath = ""
 cfgThingName = ""
 cfgEndPoint = ""
 cfgMqttPort = ""
+cfgGgHost = ""
 cfgTimeoutSec = 10
 cfgRetryLimit = 3
+cfgUseGreengrass = "no"
 cfgBrakeOnPosition = 6.5
 cfgBrakeOffPosition = 7.5
 cfgVibeDataSampleCnt = 50
@@ -117,44 +121,76 @@ def initTurbineLED():
     ledOn("blue")
     print ("Turbine LED initialized")
 
-def connectTurbineIoT():
+def storeLastGreengrassHost(ggInfo, ep, port):
+    msg = ggInfo
+    msg['LAST_HostAddress'] = ep
+    msg['LAST_PortNumber'] = port
+    msg['timestamp'] = str(datetime.utcnow().isoformat())
+    with open(cfgCertsPath + '/gg-last-host.json', 'w') as outfile:
+        json.dump(msg, outfile)
+
+def getLastGreengrassHost():
+    ggInfo = {}
+    if os.path.exists(cfgCertsPath + '/gg-last-host.json'):
+        with open(cfgCertsPath + '/gg-last-host.json', 'r') as infile:
+            ggInfo = json.load(infile)
+    return ggInfo
+
+def discoverGreengrassHost(key, cert, ca):
+    #call the Greengrass Discovery API to find the details of the gg group core
+    url = 'https://' + cfgGgHost + ':8443/greengrass/discover/thing/' + cfgThingName
+    headers = {"Content-Type":"application/json"}
+
+    for attempt in range(0, 5):
+        response = get(url, headers=headers, cert=(cert,key),  verify=ca)
+        if response:
+            resp = json.loads(response.content)
+            ggCA = resp['GGGroups'][0]['CAs'][0]
+            ggCA = ggCA.strip('\"')
+            with open(cfgCertsPath + '/gg-group-ca.pem', 'w') as outfile:
+                outfile.writelines(ggCA)
+            break
+        else:
+            print("Error calling AWS Greengrass discovery API")
+            resp = {}
+    return resp
+
+def connectTurbineIoTAttempt(ep, port, rootca, key, cert, timeoutSec, retryLimit):
     global awsIoTMQTTClient, awsShadowClient, turbineDeviceShadow
 
-    ca = cfgCertsPath + '/' + cfgCaPath
-    key = cfgCertsPath + '/' + cfgKeyPath
-    cert = cfgCertsPath + '/' + cfgCertPath
-
     awsShadowClient = AWSIoTMQTTShadowClient(cfgThingName)
-    awsShadowClient.configureEndpoint(cfgEndPoint, cfgMqttPort)
-    awsShadowClient.configureCredentials(ca, key, cert)
+    awsShadowClient.configureEndpoint(ep, port)
+    awsShadowClient.configureCredentials(rootca, key, cert)
     awsIoTMQTTClient = awsShadowClient.getMQTTConnection()
 
     # AWSIoTMQTTClient connection configuration
     awsIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
     awsIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
     awsIoTMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
-    awsIoTMQTTClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
-    awsIoTMQTTClient.configureMQTTOperationTimeout(cfgTimeoutSec)
+    awsIoTMQTTClient.configureConnectDisconnectTimeout(timeoutSec)
+    awsIoTMQTTClient.configureMQTTOperationTimeout(timeoutSec)
 
     #Attempt to connect
-    for attempt in range(1, cfgRetryLimit):
+    for attempt in range(0, retryLimit):
         try:
-            awsIoTMQTTClient.connect()
-            print ("AWS IoT connected")
-        except:
+            if awsIoTMQTTClient.connect():
+                print ("AWS IoT connected")
+        except Exception,e:
+            print str(e)
             continue
         break
 
     # Shadow config
     awsShadowClient.configureAutoReconnectBackoffTime(1, 32, 20)
-    awsShadowClient.configureConnectDisconnectTimeout(cfgTimeoutSec)
-    awsShadowClient.configureMQTTOperationTimeout(cfgTimeoutSec)
+    awsShadowClient.configureConnectDisconnectTimeout(timeoutSec)
+    awsShadowClient.configureMQTTOperationTimeout(timeoutSec)
 
-    for attempt in range(1, cfgRetryLimit):
+    for attempt in range(0, retryLimit):
         try:
-            awsShadowClient.connect()
-            print ("AWS IoT shadow topic subscribed")
-        except:
+            if awsShadowClient.connect():
+                print ("AWS IoT shadow topic subscribed")
+        except Exception,e:
+            print str(e)
             continue
         break
 
@@ -165,6 +201,61 @@ def connectTurbineIoT():
     cmdTopic = str("cmd/windfarm/turbine/" + cfgThingName + "/#")
     awsIoTMQTTClient.subscribe(cmdTopic, 1, customCallbackCmd)
     print ("AWS IoT Command Topic Subscribed: " + cmdTopic)
+
+    return True
+
+def connectTurbineIoT():
+    ca = cfgCertsPath + '/' + cfgCaPath
+    key = cfgCertsPath + '/' + cfgKeyPath
+    cert = cfgCertsPath + '/' + cfgCertPath
+    localNetworks = ["127.0.0.1", "::1"]
+
+    #if using Greengrass, there may be multiple addresses to reach the gg core/host.
+    if cfgUseGreengrass == 'yes':
+        print("Configured to use AWS Greengrass...")
+        #attempt to reconnect to the last good host
+        ggInfo = getLastGreengrassHost()
+
+        #if not none exists, attempt discovery
+        if ggInfo == {}:
+            ggInfo = discoverGreengrassHost(key, cert, ca)
+        else:
+            print("Using last known Greengrass discovery info")
+
+        if ggInfo == {}:
+            print("Can't find a way to connect to Greengrass. Exiting.")
+            quit()
+
+        timeoutSec = 10
+        retryLimit = 1
+        ggCA = cfgCertsPath + '/gg-group-ca.pem'
+
+        if 'GGGroups' in ggInfo:
+            #Try them all until one connects.
+            for ggg in ggInfo['GGGroups']:
+                for core in ggg['Cores']:
+                    for conn in core['Connectivity']:
+                        if conn['HostAddress'] not in localNetworks:
+                            print("Attempting to connect to Greengrass at: " + conn['HostAddress'] + ":" + str(conn['PortNumber']))
+                            result = connectTurbineIoTAttempt(conn['HostAddress'], conn['PortNumber'], ggCA, key, cert, timeoutSec, retryLimit)
+                            if result:
+                                #store last known good host,port and rootca
+                                storeLastGreengrassHost(ggInfo, conn['HostAddress'], conn['PortNumber'])
+                                break
+                    if result:
+                        break
+                if result:
+                    break
+        else:
+            result = False
+            print("No greengrass hosts discovered. Check your connection to the internet and try again.")
+
+    else:
+        #connection is to IoT Core
+        print("Configured to use AWS IoT Core...")
+        result = connectTurbineIoTAttempt(cfgEndPoint, cfgMqttPort, ca, key, cert, cfgTimeoutSec, cfgRetryLimit)
+
+    return result
 
 def initTurbineRPMSensor():
     global GPIO
@@ -342,7 +433,7 @@ def turbineBrakeAction(action):
         brakeServo.ChangeDutyCycle(0)
 
     elif action == "OFF":
-        print ("Resetting turbine brake.")
+        print ("Resetting turbine brake")
         turbineBrakePosPWM = cfgBrakeOffPosition
         brakeServo.ChangeDutyCycle(turbineBrakePosPWM)
         sleep(1)
@@ -458,16 +549,16 @@ def customCallbackCmd(client, userdata, message):
         payloadDict = json.loads(message.payload)
         try:
             turbineBrakePosPWM = float(payloadDict["pwm_value"])
-            myBrakeActionDurSec = None
+            brakeActionDurSec = None
             if "duration_sec" in payloadDict:
                 myDurSec = int(payloadDict["duration_sec"])
             else:
                 myDurSec = 1
 
             if "return_to_off" in payloadDict:
-                myRet2Off = bool(payloadDict["return_to_off"])
+                ret2Off = strtobool(payloadDict["return_to_off"].lower())
             else:
-                myRet2Off = True
+                ret2Off = True
 
             if "duration_sec" in payloadDict:
                 myDurSec = int(payloadDict["duration_sec"])
@@ -476,7 +567,7 @@ def customCallbackCmd(client, userdata, message):
                 myDurSec = 1
                 print ("Brake change >> " + str(turbineBrakePosPWM) + " with duration of 1 second")
 
-            turbineBrakeChange(turbineBrakePosPWM, myBrakeActionDurSec, myRet2Off)
+            turbineBrakeChange(turbineBrakePosPWM, brakeActionDurSec, ret2Off)
 
         except:
             print ("brake change failed")
@@ -606,13 +697,13 @@ def main():
                 determineTurbineSafetyState(peakVibe)
             else:
                 print("The turbine appears to be disconnected. Please check the connection.")
-                
+
             turbineVoltage = getTurbineVoltage(0)  #channel 0 of the ADC
 
             devicePayload = {
                 'thing_name' : cfgThingName,
                 'deviceID' : turbineDeviceId,
-                'timestamp' : str(datetime.datetime.utcnow().isoformat()),
+                'timestamp' : str(datetime.utcnow().isoformat()),
                 'loop_cnt' : str(loopCnt),
                 'turbine_speed' : turbineRPM,
                 'turbine_rev_cnt' : turbineRotationCnt,
@@ -663,11 +754,11 @@ def main():
                 #Only publish data if the turbine is spinning
                 if turbineRPM > 0 or lastReportedSpeed != 0:
                     #publish with QOS 0
-                    awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
+                    response = awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
                     ledFlash()
                 else:
                     #publish with QOS 0
-                    awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
+                    response = awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
                     ledFlash()
                     print("Turbine is idle... sleeping for 60 seconds")
                     #sleep a few times with a speed check to see if the turbine is spinning again
@@ -686,7 +777,8 @@ def main():
     except (KeyboardInterrupt, SystemExit): #when you press ctrl+c
         print("Disconnecting AWS IoT")
         ledOff()
-        awsShadowClient.disconnect()
+        if not awsShadowClient == None:
+            awsShadowClient.disconnect()
         sleep(2)
         print("Done.\nExiting.")
 
@@ -719,8 +811,10 @@ if __name__ == "__main__":
                     cfgKeyPath = myConfig['deviceThing']['keyPath']
                     cfgEndPoint = myConfig['deviceThing']['endPoint']
                     cfgMqttPort = myConfig['deviceThing']['mqttPort']
+                    cfgGgHost = myConfig['deviceThing']['ggHost']
                     cfgTimeoutSec = myConfig['runtime']['connection']['timeoutSec']
                     cfgRetryLimit = myConfig['runtime']['connection']['retryLimit']
+                    cfgUseGreengrass = myConfig['runtime']['connection']['useGreengrass']
                     cfgBrakeOnPosition = myConfig['settings']['brakeServo']['onPosition']
                     cfgBrakeOffPosition = myConfig['settings']['brakeServo']['offPosition']
                     cfgVibeDataSampleCnt = myConfig['settings']['vibration']['dataSampleCnt']
