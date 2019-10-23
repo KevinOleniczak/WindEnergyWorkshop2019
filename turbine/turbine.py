@@ -13,24 +13,25 @@
 # limitations under the License.
 
 from __future__ import division
-import logging
-import os.path
-import RPi.GPIO as GPIO
-from time import sleep
-import time, math
-from datetime import datetime
+import sys
 import json
+import time
+import math
 import uuid
 import socket
-import getopt, sys
-from random import randint
+import getopt
+import logging
+import os.path
+from time import sleep
+from requests import get
+from datetime import datetime
+from distutils.util import strtobool
+from random import randint  # TODO: Is this module used anywhere?
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTShadowClient
-from mpu6050 import mpu6050
 import Adafruit_MCP3008
-import math
-from requests import get
-from distutils.util import strtobool
+import RPi.GPIO as GPIO
+from mpu6050 import mpu6050
 
 # configurable settings from the config.json file
 config_file = None
