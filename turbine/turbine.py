@@ -207,7 +207,7 @@ def connect_turbine_iot_attempt(ep, port, root_ca, key, cert, timeout_sec, retry
     # Subscribe to the command topics
     cmd_topic = str("cmd/windfarm/turbine/" + cfg_thing_name + "/#")  # TODO: Can we use constants here?
     aws_iot_mqtt_client.subscribe(cmd_topic, 1, custom_callback_cmd)
-    print("AWS IoT Command Topic Subscribed: " + cmd_topic)
+    logger.info("AWS IoT Command Topic Subscribed: " + cmd_topic)
 
     return True
 
@@ -297,7 +297,7 @@ def init_turbine_vibe_sensor():
     global accelerometer
     try:
         accelerometer = mpu6050(0x68)
-        print("Turbine vibration sensor is connected")
+        logger.info("Turbine vibration sensor is connected")
     except Exception:
         logger.error("The turbine appears to be disconnected - please check the connection")
         logger.exception("Exception in init_turbine_vibe_sensor()")
@@ -787,7 +787,7 @@ def main():
                     turbine_brake_pos_pwm,
                     loop_count
                 )
-                print(device_msg)
+                logger.info(device_msg)
 
                 # determine the desired topic to publish on
                 if data_publish_send_mode == 'faster':  # TODO: Can we use constants here?
@@ -890,6 +890,7 @@ if __name__ == '__main__':
     if missingConfiguration:
         exit(2)
 
-    logging.basicConfig(filename='turbine.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(filename='/home/pi/certs/turbine.log', level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
     logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter")
     main()
