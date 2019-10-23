@@ -26,6 +26,7 @@ import getopt, sys
 from random import randint
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTShadowClient
+from AWSIoTPythonSDK.exception import AWSIoTExceptions
 from mpu6050 import mpu6050
 import Adafruit_MCP3008
 import math
@@ -195,9 +196,12 @@ def connect_turbine_iot_attempt(ep, port, root_ca, key, cert, timeout_sec, retry
     # Attempt to connect
     for attempt in range(0, retry_limit):
         try:
-            if aws_iot_mqtt_client.connect():
+            if aws_iot_mqtt_client.connect('600'):
                 logger.info("AWS IoT connected")  # TODO: change to "MQTT client connected"?
-        except Exception:
+        except TypeError as terr:
+            logger.error("aws_iot_mqtt_client.connect() TypeError: {}".format(str(terr)))
+            continue
+        except Exception as err:
             logger.exception("Exception in aws_iot_mqtt_client.connect()")
             continue
         break
@@ -209,8 +213,11 @@ def connect_turbine_iot_attempt(ep, port, root_ca, key, cert, timeout_sec, retry
 
     for attempt in range(0, retry_limit):
         try:
-            if aws_shadow_client.connect():
+            if aws_shadow_client.connect('600'):
                 logger.info("AWS IoT shadow topics subscribed")  # TODO: change to "shadow client connected"?
+        except TypeError as terr:
+            logger.error("aws_shadow_client.connect() TypeError: {}".format(str(terr)))
+            continue
         except Exception:
             logger.exception("Exception in aws_shadow_client.connect()")
             continue
@@ -853,6 +860,8 @@ def main():
         sleep(2)
         logger.info("Done, exiting.")
         logging.shutdown()
+    # TODO: We need to swallow the stacktrace when hitting Ctrl+C
+    # except AWSIoTPythonSDK.exception.AWSIoTExceptions.disconnectError as diserr:
 
 
 if __name__ == '__main__':
