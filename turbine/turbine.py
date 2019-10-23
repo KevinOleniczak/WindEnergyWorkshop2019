@@ -890,6 +890,7 @@ if __name__ == '__main__':
     if missingConfiguration:
         exit(2)
 
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
     logging.basicConfig(filename='/home/pi/certs/turbine.log', level=logging.INFO,
                         format='%(asctime)s - %(levelname)s - %(message)s')
     logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter")
