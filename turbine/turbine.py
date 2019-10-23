@@ -26,7 +26,6 @@ import getopt, sys
 from random import randint
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTShadowClient
-from AWSIoTPythonSDK.exception import AWSIoTExceptions
 from mpu6050 import mpu6050
 import Adafruit_MCP3008
 import math
@@ -859,9 +858,7 @@ def main():
             aws_shadow_client.disconnect()
         sleep(2)
         logger.info("Done, exiting.")
-        logging.shutdown()
     # TODO: We need to swallow the stacktrace when hitting Ctrl+C
-    # except AWSIoTPythonSDK.exception.AWSIoTExceptions.disconnectError as diserr:
 
 
 if __name__ == '__main__':
@@ -914,7 +911,6 @@ if __name__ == '__main__':
     if missingConfiguration:
         exit(2)
 
-    # logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
     # logging.basicConfig(filename='/home/pi/certs/turbine.log', level=logging.DEBUG,
     #                     format='%(asctime)s - %(levelname)s - %(message)s')
     logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter")
