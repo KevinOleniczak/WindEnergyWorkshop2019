@@ -61,8 +61,9 @@ file_name = 'turbine'
 
 logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s")
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.INFO)  # TODO: Can we extract this into the config.json file?
 
+# TODO: Can we extract this into the config.json file? Also include a setting for console and/or file logging.
 fileHandler = logging.FileHandler("{0}/{1}.log".format(log_path, file_name))
 fileHandler.setFormatter(logFormatter)
 logger.addHandler(fileHandler)
