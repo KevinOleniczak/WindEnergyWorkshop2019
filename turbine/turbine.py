@@ -57,7 +57,7 @@ turbine_device_id = str(uuid.getnode())
 # Enable logging
 # logger = logging.getLogger(__name__)
 log_path = '/home/pi/certs'
-file_name = 'turbine.log'
+file_name = 'turbine'
 
 logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s")
 logger = logging.getLogger()
