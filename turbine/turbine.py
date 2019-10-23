@@ -61,7 +61,7 @@ file_name = 'turbine'
 
 logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s")
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 fileHandler = logging.FileHandler("{0}/{1}.log".format(log_path, file_name))
 fileHandler.setFormatter(logFormatter)
