@@ -887,7 +887,7 @@ if __name__ == '__main__':
                     cfg_gg_host = my_config['deviceThing']['ggHost']
                     cfg_timeout_sec = my_config['runtime']['connection']['timeoutSec']
                     cfg_retry_limit = my_config['runtime']['connection']['retryLimit']
-                    cfg_use_greengrass = my_config['runtime']['connection']['useGreengrass']
+                    cfg_use_greengrass = my_config['runtime']['connection']['useGreengrass']  # TODO: Should be boolean
                     cfg_brake_on_position = my_config['settings']['brakeServo']['onPosition']
                     cfg_brake_off_position = my_config['settings']['brakeServo']['offPosition']
                     cfg_vibe_data_sample_cnt = my_config['settings']['vibration']['dataSampleCnt']

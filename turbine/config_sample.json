@@ -1,17 +1,17 @@
 {
-  "certsPath" : "/home/pi/certs",
-  "deviceThing" : {
-    "caPath" : "AmazonRootCA1.pem",
-    "certPath" : "",
-    "keyPath" : "",
-    "thingName" : "",
-    "endPoint" : "",
-    "mqttPort" : "8883",
+  "certsPath": "/home/pi/certs",
+  "deviceThing": {
+    "caPath": "AmazonRootCA1.pem",
+    "certPath": "",
+    "keyPath": "",
+    "thingName": "",
+    "endPoint": "",
+    "mqttPort": "8883",
     "ggHost": ""
   },
-  "runtime" : {
-    "cgroup" : {
-      "useSystemd" : "yes"
+  "runtime": {
+    "cgroup": {
+      "useSystemd": "yes"
     },
     "connection": {
       "timeoutSec": 10,
