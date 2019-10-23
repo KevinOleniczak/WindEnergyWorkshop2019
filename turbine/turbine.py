@@ -55,7 +55,21 @@ cfg_vibe_data_sample_cnt = 50
 turbine_device_id = str(uuid.getnode())
 
 # Enable logging
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
+log_path = '/home/pi/certs'
+file_name = 'turbine.log'
+
+logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s")
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
+fileHandler = logging.FileHandler("{0}/{1}.log".format(log_path, file_name))
+fileHandler.setFormatter(logFormatter)
+logger.addHandler(fileHandler)
+
+consoleHandler = logging.StreamHandler()
+consoleHandler.setFormatter(logFormatter)
+logger.addHandler(consoleHandler)
 
 # Keep track of the safety state
 turbine_safety_state = ''  # TODO: there should be only 2 states (safe/unsafe), can we default to one? Use constants?
@@ -890,8 +904,8 @@ if __name__ == '__main__':
     if missingConfiguration:
         exit(2)
 
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
-    logging.basicConfig(filename='/home/pi/certs/turbine.log', level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(message)s')
+    # logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+    # logging.basicConfig(filename='/home/pi/certs/turbine.log', level=logging.DEBUG,
+    #                     format='%(asctime)s - %(levelname)s - %(message)s')
     logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter")
     main()
