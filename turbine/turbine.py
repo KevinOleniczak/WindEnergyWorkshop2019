@@ -58,21 +58,21 @@ turbine_device_id = str(uuid.getnode())
 
 # Enable logging
 # logger = logging.getLogger(__name__)
-log_path = '/home/pi/certs'
-file_name = 'turbine'
+# log_path = '/home/pi/certs'
+# file_name = 'turbine'
 
-logFormatter = logging.Formatter("%(asctime)s [%(threadName)-10.10s] [%(levelname)-5.5s]  %(message)s")
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)  # TODO: Can we extract this into the config.json file?
+# logFormatter = logging.Formatter("%(asctime)s [%(threadName)-10.10s] [%(levelname)-5.5s]  %(message)s")
+# logger = logging.getLogger()
+# logger.setLevel(logging.INFO)  # TODO: Can we extract this into the config.json file?
 
 # TODO: Can we extract this into the config.json file? Also include a setting for console and/or file logging.
-fileHandler = logging.FileHandler("{0}/{1}.log".format(log_path, file_name))
-fileHandler.setFormatter(logFormatter)
-logger.addHandler(fileHandler)
+# fileHandler = logging.FileHandler("{0}/{1}.log".format(log_path, file_name))
+# fileHandler.setFormatter(logFormatter)
+# logger.addHandler(fileHandler)
 
-consoleHandler = logging.StreamHandler()
-consoleHandler.setFormatter(logFormatter)
-logger.addHandler(consoleHandler)
+# consoleHandler = logging.StreamHandler()
+# consoleHandler.setFormatter(logFormatter)
+# logger.addHandler(consoleHandler)
 
 # Keep track of the safety state
 turbine_safety_state = ''  # TODO: there should be only 2 states (safe/unsafe), can we default to one? Use constants?
