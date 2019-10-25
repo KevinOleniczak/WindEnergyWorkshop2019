@@ -129,7 +129,8 @@ def init_turbine_gpio():
     global GPIO
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
-    logger.info("Turbine GPIO initialized")
+    # logger.info("Turbine GPIO initialized")
+    print("Turbine GPIO initialized")
 
 
 def init_turbine_led():
@@ -138,7 +139,8 @@ def init_turbine_led():
     GPIO.setup(led_green_pin, GPIO.OUT)
     GPIO.setup(led_blue_pin, GPIO.OUT)
     led_on('blue')  # TODO: Can we use constants here?
-    logger.info("Turbine LED initialized")
+    # logger.info("Turbine LED initialized")
+    print("Turbine LED initialized")
 
 
 def store_last_greengrass_host(gg_info, ep, port):
@@ -198,12 +200,15 @@ def connect_turbine_iot_attempt(ep, port, root_ca, key, cert, timeout_sec, retry
     for attempt in range(0, retry_limit):
         try:
             if aws_iot_mqtt_client.connect('600'):
-                logger.info("AWS IoT connected")  # TODO: change to "MQTT client connected"?
+                # logger.info("AWS IoT connected")  # TODO: change to "MQTT client connected"?
+                print("AWS IoT connected")  # TODO: change to "MQTT client connected"?
         except TypeError as terr:
-            logger.error("aws_iot_mqtt_client.connect() TypeError: {}".format(str(terr)))
+            # logger.error("aws_iot_mqtt_client.connect() TypeError: {}".format(str(terr)))
+            print("aws_iot_mqtt_client.connect() TypeError: {}".format(str(terr)))
             continue
         except Exception as err:
-            logger.exception("Exception in aws_iot_mqtt_client.connect()")
+            # logger.exception("Exception in aws_iot_mqtt_client.connect()")
+            print("Exception in aws_iot_mqtt_client.connect()")
             continue
         break
 
@@ -215,12 +220,15 @@ def connect_turbine_iot_attempt(ep, port, root_ca, key, cert, timeout_sec, retry
     for attempt in range(0, retry_limit):
         try:
             if aws_shadow_client.connect('600'):
-                logger.info("AWS IoT shadow topics subscribed")  # TODO: change to "shadow client connected"?
+                # logger.info("AWS IoT shadow topics subscribed")  # TODO: change to "shadow client connected"?
+                print("AWS IoT shadow topics subscribed")  # TODO: change to "shadow client connected"?
         except TypeError as terr:
-            logger.error("aws_shadow_client.connect() TypeError: {}".format(str(terr)))
+            # logger.error("aws_shadow_client.connect() TypeError: {}".format(str(terr)))
+            print("aws_shadow_client.connect() TypeError: {}".format(str(terr)))
             continue
         except Exception:
-            logger.exception("Exception in aws_shadow_client.connect()")
+            # logger.exception("Exception in aws_shadow_client.connect()")
+            print("Exception in aws_shadow_client.connect()")
             continue
         break
 
@@ -230,7 +238,8 @@ def connect_turbine_iot_attempt(ep, port, root_ca, key, cert, timeout_sec, retry
     # Subscribe to the command topics
     cmd_topic = str("cmd/windfarm/turbine/" + cfg_thing_name + "/#")  # TODO: Can we use constants here?
     aws_iot_mqtt_client.subscribe(cmd_topic, 1, custom_callback_cmd)
-    logger.info("AWS IoT Command Topic Subscribed: " + cmd_topic)
+    # logger.info("AWS IoT Command Topic Subscribed: " + cmd_topic)
+    print("AWS IoT Command Topic Subscribed: " + cmd_topic)
 
     return True
 
@@ -243,7 +252,8 @@ def connect_turbine_iot():
 
     # if using Greengrass, there may be multiple addresses to reach the gg core/host.
     if cfg_use_greengrass == 'yes':
-        logger.info("Configured to use AWS Greengrass")
+        # logger.info("Configured to use AWS Greengrass")
+        print("Configured to use AWS Greengrass")
         # attempt to reconnect to the last good host
         gg_info = get_last_greengrass_host()
 
@@ -251,10 +261,12 @@ def connect_turbine_iot():
         if gg_info == {}:
             gg_info = discover_greengrass_host(key, cert, ca)
         else:
-            logger.info("Using last known Greengrass discovery info")
+            # logger.info("Using last known Greengrass discovery info")
+            print("Using last known Greengrass discovery info")
 
         if gg_info == {}:
-            logger.warning("Can't find a way to connect to Greengrass. Exiting.")
+            # logger.warning("Can't find a way to connect to Greengrass. Exiting.")
+            print("Can't find a way to connect to Greengrass. Exiting.")
             quit()
 
         timeout_sec = 10
@@ -269,7 +281,9 @@ def connect_turbine_iot():
                 for core in ggg['Cores']:
                     for conn in core['Connectivity']:
                         if conn['HostAddress'] not in local_networks:
-                            logger.info("Attempting to connect to Greengrass at " + conn['HostAddress'] + ":" + str(
+                            # logger.info("Attempting to connect to Greengrass at " + conn['HostAddress'] + ":" + str(
+                            #     conn['PortNumber']))
+                            print("Attempting to connect to Greengrass at " + conn['HostAddress'] + ":" + str(
                                 conn['PortNumber']))
                             result = connect_turbine_iot_attempt(conn['HostAddress'], conn['PortNumber'], gg_ca, key,
                                                                  cert, timeout_sec, retry_limit)
@@ -283,11 +297,13 @@ def connect_turbine_iot():
                     break
         else:
             # TODO: This might not be a .warning() but rather a .info()
-            logger.warning("No greengrass hosts discovered - check your connection to the internet and try again")
+            # logger.warning("No greengrass hosts discovered - check your connection to the internet and try again")
+            print("No greengrass hosts discovered - check your connection to the internet and try again")
 
     else:
         # connection is to IoT Core
-        logger.info("Configured to use AWS IoT Core")
+        # logger.info("Configured to use AWS IoT Core")
+        print("Configured to use AWS IoT Core")
         result = connect_turbine_iot_attempt(cfg_end_point, cfg_mqtt_port, ca, key, cert, cfg_timeout_sec,
                                              cfg_retry_limit)
 
@@ -298,7 +314,8 @@ def init_turbine_rpm_sensor():
     global GPIO
     GPIO.setup(turbine_rotation_sensor_pin, GPIO.IN, GPIO.PUD_UP)
     GPIO.add_event_detect(turbine_rotation_sensor_pin, GPIO.FALLING, callback=calculate_turbine_elapse, bouncetime=20)
-    logger.info("Turbine rotation sensor is connected")
+    # logger.info("Turbine rotation sensor is connected")
+    print("Turbine rotation sensor is connected")
 
 
 def init_turbine_buttons():
@@ -307,23 +324,27 @@ def init_turbine_buttons():
     GPIO.setup(21, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
     GPIO.setup(20, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
     GPIO.setup(16, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-    logger.info("Turbine buttons enabled")
+    # logger.info("Turbine buttons enabled")
+    print("Turbine buttons enabled")
 
 
 def init_turbine_voltage_sensor():
     global adc_sensor
     adc_sensor = Adafruit_MCP3008.MCP3008(clk=clk, cs=cs, miso=miso, mosi=mosi)
-    logger.info("Turbine voltage sensor is connected")
+    # logger.info("Turbine voltage sensor is connected")
+    print("Turbine voltage sensor is connected")
 
 
 def init_turbine_vibe_sensor():
     global accelerometer
     try:
         accelerometer = mpu6050(0x68)
-        logger.info("Turbine vibration sensor is connected")
+        # logger.info("Turbine vibration sensor is connected")
+        print("Turbine vibration sensor is connected")
     except Exception:
-        logger.error("The turbine appears to be disconnected - please check the connection")
-        logger.exception("Exception in init_turbine_vibe_sensor()")
+        # logger.error("The turbine appears to be disconnected - please check the connection")
+        print("The turbine appears to be disconnected - please check the connection")
+        # logger.exception("Exception in init_turbine_vibe_sensor()")
 
 
 def init_turbine_brake():
@@ -331,25 +352,29 @@ def init_turbine_brake():
     GPIO.setup(turbine_servo_brake_pin, GPIO.OUT)
     brake_servo = GPIO.PWM(turbine_servo_brake_pin, 50)
     brake_servo.start(0)
-    logger.info("Turbine brake connected")
+    # logger.info("Turbine brake connected")
+    print("Turbine brake connected")
 
 
 def reset_turbine_brake():
     process_shadow_change('brake_status', 'OFF', 'desired')
     turbine_brake_action('OFF')
-    logger.info("Turbine brake reset")
+    # logger.info("Turbine brake reset")
+    print("Turbine brake reset")
 
 
 def check_buttons():
     button_state = GPIO.input(21)  # Switch1 (S1)
     if button_state:
-        logger.info("Manual brake reset event")
+        # logger.info("Manual brake reset event")
+        print("Manual brake reset event")
         reset_turbine_brake()
         button_state = False
 
     button_state = GPIO.input(20)  # Switch2 (S2)
     if button_state:
-        logger.info("Set brake on event")
+        # logger.info("Set brake on event")
+        print("Set brake on event")
         if not brake_state:
             process_shadow_change("brake_status", "ON", "desired")
             turbine_brake_action("ON")
@@ -357,7 +382,8 @@ def check_buttons():
 
     button_state = GPIO.input(16)  # Switch3 (S3)
     if button_state:
-        logger.info("TBD button pressed")  # TODO: What does this message mean? Is the use of button 3 'TBD'?
+        # logger.info("TBD button pressed")  # TODO: What does this message mean? Is the use of button 3 'TBD'?
+        print("TBD button pressed")  # TODO: What does this message mean? Is the use of button 3 'TBD'?
         button_state = False  # TODO: remove local button_state if not being used
 
     sleep(0.1)
@@ -386,17 +412,20 @@ def check_turbine_vibe_sensor_available():
         accel = accelerometer.get_accel_data()  # TODO: Why store the return value in accel? It's local only.
         return True
     except Exception:
-        logger.exception("Exception in check_turbine_vibe_sensor_available()")
+        # logger.exception("Exception in check_turbine_vibe_sensor_available()")
+        print("Exception in check_turbine_vibe_sensor_available()")
         return False
 
 
 def calibrate_turbine_vibe_sensor():
     global accel_x_cal, accel_y_cal, accel_z_cal
     if not check_turbine_vibe_sensor_available():
-        logger.warning("The turbine appears to be disconnected - please check the connection")
+        # logger.warning("The turbine appears to be disconnected - please check the connection")
+        print("The turbine appears to be disconnected - please check the connection")
         return 0
 
-    logger.info("Keep the turbine stationary for calibration")
+    # logger.info("Keep the turbine stationary for calibration")
+    print("Keep the turbine stationary for calibration")
 
     # Get the current speed.
     # Since the turbine has just started up, need to wait a bit and take a second reading to get am accurate value.
@@ -404,7 +433,8 @@ def calibrate_turbine_vibe_sensor():
     sleep(3)
     speed = calculate_turbine_speed()
     while speed > 0:
-        logger.warning("Please stop the turbine from spinning so the calibration can proceed")
+        # logger.warning("Please stop the turbine from spinning so the calibration can proceed")
+        print("Please stop the turbine from spinning so the calibration can proceed")
         sleep(3)
         speed = calculate_turbine_speed()
 
@@ -423,16 +453,18 @@ def calibrate_turbine_vibe_sensor():
             accel_y_list.append(_accel_y)
             accel_z_list.append(_accel_z)
         except Exception:
-            logger.error("The turbine appears to be disconnected - please check the connection")
-            logger.exception("Exception in calibrate_turbine_vibe_sensor()")
+            # logger.error("The turbine appears to be disconnected - please check the connection")
+            print("The turbine appears to be disconnected - please check the connection")
+            # logger.exception("Exception in calibrate_turbine_vibe_sensor()")
         sleep(0.1)
 
     # Assign to the calibration variable set
     accel_x_cal = sum(accel_x_list) / len(accel_x_list)
     accel_y_cal = sum(accel_y_list) / len(accel_y_list)
     accel_z_cal = sum(accel_z_list) / len(accel_z_list)
-    logger.info(
-        "Vibration calibration - X: " + str(accel_x_cal) + " Y: " + str(accel_y_cal) + " Z: " + str(accel_z_cal))
+    # logger.info(
+    #     "Vibration calibration - X: " + str(accel_x_cal) + " Y: " + str(accel_y_cal) + " Z: " + str(accel_z_cal))
+    print("Vibration calibration - X: " + str(accel_x_cal) + " Y: " + str(accel_y_cal) + " Z: " + str(accel_z_cal))
 
 
 def calculate_turbine_vibe():
@@ -452,7 +484,8 @@ def calculate_turbine_vibe():
         accel_z -= accel_z_cal
         return 1
     except Exception:
-        logger.exception("Exception in calculate_turbine_vibe()")
+        # logger.exception("Exception in calculate_turbine_vibe()")
+        print("Exception in calculate_turbine_vibe()")
         return 0
 
 
@@ -470,11 +503,13 @@ def get_ip():
         s.connect(('10.255.255.255', 1))
         ip = s.getsockname()[0]
     except Exception:
-        logger.exception("Exception in get_ip()")
+        # logger.exception("Exception in get_ip()")
+        print("Exception in get_ip()")
         (ip == '127.0.0.1') | (ip == '127.0.1.1')
     finally:
         s.close()
-    logger.debug("IP address is " + ip)
+    # logger.debug("IP address is " + ip)
+    print("IP address is " + ip)
     return ip
 
 
@@ -484,14 +519,16 @@ def turbine_brake_action(action):
         return "Already there"  # TODO: What is this return string used for? It doesn't sound very good.
 
     if action == 'ON':  # TODO: Can we use constants here?
-        logger.info("Applying turbine brake")
+        # logger.info("Applying turbine brake")
+        print("Applying turbine brake")
         turbine_brake_pos_pwm = cfg_brake_on_position
         brake_servo.ChangeDutyCycle(turbine_brake_pos_pwm)
         sleep(3)
         brake_servo.ChangeDutyCycle(0)
 
     elif action == "OFF":  # TODO: Can we use constants here?
-        logger.info("Resetting turbine brake")
+        # logger.info("Resetting turbine brake")
+        print("Resetting turbine brake")
         turbine_brake_pos_pwm = cfg_brake_off_position
         brake_servo.ChangeDutyCycle(turbine_brake_pos_pwm)
         sleep(1)
@@ -516,7 +553,8 @@ def turbine_brake_action(action):
             turbine_device_shadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), shadow_callback, 5)
             still_trying = False
         except Exception:
-            logger.exception("Exception in turbine_brake_action()::while")  # TODO: Can be possibly suppressed.
+            # logger.exception("Exception in turbine_brake_action()::while")  # TODO: Can be possibly suppressed.
+            print("Exception in turbine_brake_action()::while")  # TODO: Can be possibly suppressed.
             try_count += 1
             logger.info("Try " + str(try_count))
             sleep(1)
@@ -565,9 +603,11 @@ def process_shadow_change(param, value, type):
             turbine_device_shadow.shadowUpdate(json.dumps(shadow_payload).encode("utf-8"), shadow_callback, 5)
             still_trying = False
         except Exception:
-            logger.exception("Exception in process_shadow_change()::while")  # TODO: Can be possibly suppressed.
+            # logger.exception("Exception in process_shadow_change()::while")  # TODO: Can be possibly suppressed.
+            print("Exception in process_shadow_change()::while")  # TODO: Can be possibly suppressed.
             try_count += 1
-            logger.info("Try " + str(try_count))
+            # logger.info("Try " + str(try_count))
+            print("Try " + str(try_count))
             sleep(1)
             if try_count > 10:
                 still_trying = False
@@ -576,11 +616,13 @@ def process_shadow_change(param, value, type):
 
 def shadow_callback_delta(payload, response_status, token):
     global data_publish_send_mode, data_publish_interval, vibe_limit  # TODO: vibe_limit is undefined at Global level
-    logger.info("Delta shadow callback: " + payload)
+    # logger.info("Delta shadow callback: " + payload)
+    print("Delta shadow callback: " + payload)
 
     if response_status == 'delta/' + cfg_thing_name:
         payload_dict = json.loads(payload)
-        logger.info("Shadow delta: " + payload)  # TODO: Why are we printing the contents of 'payload' again?
+        # logger.info("Shadow delta: " + payload)  # TODO: Why are we printing the contents of 'payload' again?
+        print("Shadow delta: " + payload)  # TODO: Why are we printing the contents of 'payload' again?
         try:
             if 'brake_status' in payload_dict['state']:  # TODO: Can we use constants here?
                 turbine_brake_action(payload_dict['state']['brake_status'])
@@ -596,18 +638,22 @@ def shadow_callback_delta(payload, response_status, token):
                 vibe_limit = float(payload_dict['state']['vibe_limit'])
                 process_shadow_change('vibe_limit', vibe_limit, 'reported')
         except Exception:
-            logger.exception("Exception in shadow_callback_delta()::try")
+            # logger.exception("Exception in shadow_callback_delta()::try")
+            print("Exception in shadow_callback_delta()::try")
 
 
 def shadow_callback(payload, response_status, token):
     if response_status == 'timeout':
-        logger.warning("Update request " + token + " timed out")
+        # logger.warning("Update request " + token + " timed out")
+        print("Update request " + token + " timed out")
 
     if response_status == 'accepted':
-        logger.info("Shadow accepted")
+        # logger.info("Shadow accepted")
+        print("Shadow accepted")
 
     if response_status == 'rejected':
-        logger.error("Update request " + token + " rejected")
+        # logger.error("Update request " + token + " rejected")
+        print("Update request " + token + " rejected")
 
 
 def custom_callback_cmd(client, userdata, message):
@@ -630,17 +676,21 @@ def custom_callback_cmd(client, userdata, message):
 
             if 'duration_sec' in payload_dict:  # TODO: Can we use constants here?
                 my_dur_sec = int(payload_dict['duration_sec'])
-                logger.info(
+                # logger.info(
+                #   "Brake change " + str(turbine_brake_pos_pwm) + " with duration of " + str(my_dur_sec) + " seconds")
+                print(
                     "Brake change " + str(turbine_brake_pos_pwm) + " with duration of " + str(my_dur_sec) + " seconds")
             else:
                 my_dur_sec = 1
-                logger.info("Brake change " + str(turbine_brake_pos_pwm) + " with duration of 1 second")
+                # logger.info("Brake change " + str(turbine_brake_pos_pwm) + " with duration of 1 second")
+                print("Brake change " + str(turbine_brake_pos_pwm) + " with duration of 1 second")
 
             turbine_brake_change(turbine_brake_pos_pwm, brake_action_dur_sec, ret2_off)
 
         except Exception:
-            logger.error("Brake change failed")
-            logger.exception("Exception in custom_callback_cmd()::try")
+            # logger.error("Brake change failed")
+            print("Brake change failed")
+            # logger.exception("Exception in custom_callback_cmd()::try")
 
 
 def determine_turbine_safety_state(vibe, _vibe_limit=5):
@@ -714,9 +764,12 @@ def led_flash(mode='off-on', duration=None):
 
 
 def main():
-    logger.info("AWS IoT Wind Energy Turbine Program")
-    logger.info("DeviceID: " + turbine_device_id)
-    logger.info("ThingName: " + cfg_thing_name)
+    # logger.info("AWS IoT Wind Energy Turbine Program")
+    # logger.info("DeviceID: " + turbine_device_id)
+    # logger.info("ThingName: " + cfg_thing_name)
+    print("AWS IoT Wind Energy Turbine Program")
+    print("DeviceID: " + turbine_device_id)
+    print("ThingName: " + cfg_thing_name)
     loop_count = 0
     data_sample_count = 0  # TODO: Is this local variable used?
     last_reported_speed = -1  # TODO: Is this local variable used?
@@ -735,7 +788,8 @@ def main():
         init_turbine_brake()
         reset_turbine_brake()
 
-        logger.info("Starting turbine monitoring")
+        # logger.info("Starting turbine monitoring")
+        print("Starting turbine monitoring")
 
         while True:
             calculate_turbine_speed()
@@ -771,7 +825,8 @@ def main():
 
                 determine_turbine_safety_state(peak_vibe)
             else:
-                logger.warning("The turbine appears to be disconnected - please check the connection")
+                # logger.warning("The turbine appears to be disconnected - please check the connection")
+                print("The turbine appears to be disconnected - please check the connection")
 
             turbine_voltage = get_turbine_voltage(0)  # channel 0 of the ADC
 
@@ -810,7 +865,8 @@ def main():
                     turbine_brake_pos_pwm,
                     loop_count
                 )
-                logger.info(device_msg)
+                # logger.info(device_msg)
+                print(device_msg)
 
                 # determine the desired topic to publish on
                 if data_publish_send_mode == 'faster':  # TODO: Can we use constants here?
@@ -837,7 +893,8 @@ def main():
                     # TODO: Why store 'response' if it's not used?
                     response = aws_iot_mqtt_client.publish(publish_topic, json.dumps(device_payload), 0)
                     led_flash()
-                    logger.info("Turbine is idle - sleeping for 60 seconds")
+                    # logger.info("Turbine is idle - sleeping for 60 seconds")
+                    print("Turbine is idle - sleeping for 60 seconds")
                     # sleep a few times with a speed check to see if the turbine is spinning again
                     for i in range(1, 12):
                         calculate_turbine_speed()
@@ -850,20 +907,24 @@ def main():
                         sleep(5)  # slow down the publishing rate
 
             except Exception:
-                logger.warning("Exception while publishing in main()")
+                # logger.warning("Exception while publishing in main()")
+                print("Exception while publishing in main()")
                 raise
 
     # except AWSIoTExceptions.disconnectError:
     #     # TODO: We need to swallow the stacktrace when hitting Ctrl+C
     #     logger.info("Hit the disconnectError")
+    #     print("Hit the disconnectError")
 
     except (KeyboardInterrupt, SystemExit):  # when you press ctrl+c
-        logger.info("Disconnecting from AWS IoT")
+        # logger.info("Disconnecting from AWS IoT")
+        print("Disconnecting from AWS IoT")
         led_off()
         if aws_shadow_client is not None:
             aws_shadow_client.disconnect()
         sleep(2)
-        logger.info("Done, exiting.")
+        # logger.info("Done, exiting.")
+        print("Done, exiting.")
 
 
 if __name__ == '__main__':
@@ -905,7 +966,8 @@ if __name__ == '__main__':
 
     except getopt.GetoptError:
         print(usage_info)
-        logger.exception("GetoptError exception in __main__")
+        # logger.exception("GetoptError exception in __main__")
+        print("GetoptError exception in __main__")
         exit(1)
 
     # Missing configuration notification
@@ -918,5 +980,6 @@ if __name__ == '__main__':
 
     # logging.basicConfig(filename='/home/pi/certs/turbine.log', level=logging.DEBUG,
     #                     format='%(asctime)s - %(levelname)s - %(message)s')
-    logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter")
+    # logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter")
+    print("Welcome to the AWS Wind Energy Turbine Device Reporter")
     main()
