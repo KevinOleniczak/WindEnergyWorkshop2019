@@ -29,6 +29,7 @@ from distutils.util import strtobool
 from random import randint  # TODO: Is this module used anywhere?
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTShadowClient
+# from AWSIoTPythonSDK.exception import AWSIoTExceptions
 import Adafruit_MCP3008
 import RPi.GPIO as GPIO
 from mpu6050 import mpu6050
@@ -60,7 +61,7 @@ turbine_device_id = str(uuid.getnode())
 log_path = '/home/pi/certs'
 file_name = 'turbine'
 
-logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s")
+logFormatter = logging.Formatter("%(asctime)s [%(threadName)-10.10s] [%(levelname)-5.5s]  %(message)s")
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)  # TODO: Can we extract this into the config.json file?
 
@@ -852,6 +853,10 @@ def main():
                 logger.warning("Exception while publishing in main()")
                 raise
 
+    # except AWSIoTExceptions.disconnectError:
+    #     # TODO: We need to swallow the stacktrace when hitting Ctrl+C
+    #     logger.info("Hit the disconnectError")
+
     except (KeyboardInterrupt, SystemExit):  # when you press ctrl+c
         logger.info("Disconnecting from AWS IoT")
         led_off()
@@ -859,7 +864,6 @@ def main():
             aws_shadow_client.disconnect()
         sleep(2)
         logger.info("Done, exiting.")
-    # TODO: We need to swallow the stacktrace when hitting Ctrl+C
 
 
 if __name__ == '__main__':
