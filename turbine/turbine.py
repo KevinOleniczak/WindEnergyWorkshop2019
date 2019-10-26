@@ -79,6 +79,7 @@ awsIoTMQTTClient = None
 awsShadowClient = None
 turbineDeviceShadow = None
 dataPublishSendMode = "normal"
+dataPublishHiResSendMode = "off"
 dataPublishInterval = 5
 
 #Turbine rotation speed sensor
@@ -513,7 +514,7 @@ def processShadowChange(param,value,type):
     return value
 
 def shadowCallbackDelta(payload, responseStatus, token):
-    global dataPublishSendMode, dataPublishInterval, vibe_limit
+    global dataPublishSendMode, dataPublishInterval, vibe_limit, dataPublishHiResSendMode
     print ("delta shadow callback >> " + payload)
 
     if responseStatus == "delta/" + cfgThingName:
@@ -529,6 +530,9 @@ def shadowCallbackDelta(payload, responseStatus, token):
             if "vibe_limit" in payloadDict["state"]:
                  vibe_limit = float(payloadDict["state"]["vibe_limit"])
                  processShadowChange("vibe_limit", vibe_limit, "reported")
+            if "hires_publish_mode" in payloadDict["state"]:
+                dataPublishHiResSendMode = float(payloadDict["state"]["hires_publish_mode"])
+                processShadowChange("hires_publish_mode", dataPublishHiResSendMode, "reported")
         except:
             print ("delta cb error")
 
@@ -661,6 +665,7 @@ def main():
         resetTurbineBrake()
 
         print("Starting turbine monitoring...")
+        publishTopicHiRes = "dt/windfarm/turbine/" + cfgThingName + "/hi-res"
 
         while True:
             calculateTurbineSpeed()
@@ -688,6 +693,20 @@ def main():
 
                     #check for a button press events
                     checkButtons()
+
+                    if dataPublishHiResSendMode == 'vibe' and turbineRPM > 0:
+                        devicePayloadHiRes = {
+                            'thing_name' : cfgThingName,
+                            'deviceID' : turbineDeviceId,
+                            'timestamp' : str(datetime.utcnow().isoformat()),
+                            'loop_cnt' : str(loopCnt),
+                            'turbine_vibe_x' : accelX,
+                            'turbine_vibe_y' : accelY,
+                            'turbine_vibe_z' : accelZ,
+                            'turbine_vibe' : currentVibe
+                            }
+                        #publish every vibe measurement for detailed analysis and ml
+                        response = awsIoTMQTTClient.publish(publishTopicHiRes, json.dumps(devicePayloadHiRes), 0)
 
                 if len(vibeDataList) > 0:
                     avgVibe = sum(vibeDataList) / len(vibeDataList)
