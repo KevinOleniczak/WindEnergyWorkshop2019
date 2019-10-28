@@ -486,6 +486,31 @@ def turbineBrakeChange (newPWMval,newActionDurSec,newReturnToOff):
         #remove brake pressure after specified duration
         brakeServo.ChangeDutyCycle(0)
 
+#get the latest shadow and update local variables
+def initShadowVariables():
+    turbineDeviceShadow.shadowGet(shadowCallbackReported, 10)
+
+def shadowCallbackReported(payload, responseStatus, token):
+    payloadDict = json.loads(payload)
+    #print ("shadow Report >> " + payload)
+    try:
+        if "data_path" in payloadDict["state"]["reported"]:
+            dataPublishSendMode = payloadDict["state"]["reported"]["data_path"]
+
+        if "data_fast_interval" in payloadDict["state"]["reported"]:
+            dataPublishInterval = int(payloadDict["state"]["reported"]["data_fast_interval"])
+
+        if "vibe_limit" in payloadDict["state"]["reported"]:
+            vibe_limit = float(payloadDict["state"]["reported"]["vibe_limit"])
+
+        if "hires_publish_mode" in payloadDict["state"]["reported"]:
+            dataPublishHiResSendMode = payloadDict["state"]["reported"]["hires_publish_mode"]
+
+        print("Turbine is in sync with the shadow settings.")
+
+    except Exception,e:
+        print ("Shadow get failed")
+        pass
 
 #generic procedure to acknowledge shadow changes
 def processShadowChange(param,value,type):
@@ -522,19 +547,19 @@ def shadowCallbackDelta(payload, responseStatus, token):
         print ("shadow delta >> " + payload)
         try:
             if "brake_status" in payloadDict["state"]:
-                 turbineBrakeAction(payloadDict["state"]["brake_status"])
+                turbineBrakeAction(payloadDict["state"]["brake_status"])
             if "data_path" in payloadDict["state"]:
-                 dataPublishSendMode = processShadowChange("data_path", payloadDict["state"]["data_path"], "reported")
+                dataPublishSendMode = processShadowChange("data_path", payloadDict["state"]["data_path"], "reported")
             if "data_fast_interval" in payloadDict["state"]:
-                 dataPublishInterval = int(processShadowChange("data_fast_interval", payloadDict["state"]["data_fast_interval"]), "reported")
+                dataPublishInterval = int(processShadowChange("data_fast_interval", payloadDict["state"]["data_fast_interval"]), "reported")
             if "vibe_limit" in payloadDict["state"]:
-                 vibe_limit = float(payloadDict["state"]["vibe_limit"])
-                 processShadowChange("vibe_limit", vibe_limit, "reported")
+                vibe_limit = float(payloadDict["state"]["vibe_limit"])
+                processShadowChange("vibe_limit", vibe_limit, "reported")
             if "hires_publish_mode" in payloadDict["state"]:
-                dataPublishHiResSendMode = float(payloadDict["state"]["hires_publish_mode"])
+                dataPublishHiResSendMode = payloadDict["state"]["hires_publish_mode"]
                 processShadowChange("hires_publish_mode", dataPublishHiResSendMode, "reported")
-        except:
-            print ("delta cb error")
+        except Exception,e:
+            print ("delta cb error: " + str(e))
 
 def shadowCallback(payload, responseStatus, token):
     if responseStatus == "timeout":
@@ -663,6 +688,7 @@ def main():
         connectTurbineIoT()
         initTurbineBrake()
         resetTurbineBrake()
+        initShadowVariables()
 
         print("Starting turbine monitoring...")
         publishTopicHiRes = "dt/windfarm/turbine/" + cfgThingName + "/hi-res"
