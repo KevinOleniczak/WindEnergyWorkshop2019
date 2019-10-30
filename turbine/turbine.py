@@ -997,4 +997,3 @@ if __name__ == "__main__":
     logging.basicConfig(filename='turbine.log', level=logging.INFO, format='%(asctime)s %(message)s')
     logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter.")
     main()
-
