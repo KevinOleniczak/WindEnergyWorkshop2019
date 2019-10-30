@@ -31,6 +31,11 @@ import Adafruit_MCP3008
 import math
 from requests import get
 from distutils.util import strtobool
+import subprocess
+import Adafruit_SSD1306
+from PIL import Image
+from PIL import ImageDraw
+from PIL import ImageFont
 
 # configurable settings from the config.json file
 configFile = None
@@ -108,6 +113,11 @@ ledRedPin = 5
 ledGreenPin = 6
 ledBluePin = 13
 
+oledDisplay = None
+oledImage = None
+oledDraw = None
+oledFont = None
+oledTop = 0
 
 def initTurbineGPIO():
     global GPIO
@@ -124,6 +134,55 @@ def initTurbineLED():
     ledOn("blue")
     print("Turbine LED initialized")
 
+def initOLED():
+    global oledDisplay, oledImage, oledDraw, oledTop, oledFont
+
+    #stop the running service that is showing the IP address on boot
+    #systemctl stop display_myip.service
+    return_code = subprocess.call(['sudo', 'systemctl', 'stop', 'display_myip.service'])
+    sleep(1)
+
+    # 128x64 display with hardware I2C:
+    RST = None     # on the PiOLED this pin isnt used
+    DC = 23
+    SPI_PORT = 0
+    SPI_DEVICE = 0
+    oledDisplay = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
+    oledDisplay.begin()
+
+    # Clear display.
+    oledDisplay.clear()
+    oledDisplay.display()
+
+    # Create blank image for drawing.
+    # Make sure to create image with mode '1' for 1-bit color.
+    width = oledDisplay.width
+    height = oledDisplay.height
+    oledImage = Image.new('1', (width, height))
+
+    # Get drawing object to draw on image.
+    oledDraw = ImageDraw.Draw(oledImage)
+
+    # Draw a black filled box to clear the image.
+    oledDraw.rectangle((0,0,width,height), outline=0, fill=0)
+
+    padding = -2
+    oledTop = padding
+    bottom = height-padding
+    x = 0
+    oledFont = ImageFont.load_default()
+    oledDraw.text((x, oledTop),       cfgThingName,  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+8),     "IP: " + getIp(),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+16),    "Connected: ",  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+26),    "Speed: ",  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+36),    "Voltage: ",  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+46),    "Vibe Peak: ",  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+56),    "Brake PWM: ",  font=oledFont, fill=255)
+
+    oledDisplay.image(oledImage)
+    oledDisplay.display()
+
+    print("OLED Display initialized")
 
 def storeLastGreengrassHost(ggInfo, ep, port):
     msg = ggInfo
@@ -312,6 +371,24 @@ def resetTurbineBrake():
     turbineBrakeAction("OFF")
     print("Turbine brake reset")
 
+def updateOledDisplay(msg):
+    global oledDisplay, oledDraw, oledImage
+
+    width = oledDisplay.width
+    height = oledDisplay.height
+    oledDraw.rectangle((0,0,width,height), outline=0, fill=0)
+
+    x = 0
+    oledDraw.text((x, oledTop),       cfgThingName,  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+8),     "IP: " + getIp(),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+16),    "Connected: ",  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+26),    "Speed: {0:.1f}".format(msg['turbine_speed']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+36),    "Voltage: {0:.1f}".format(msg['turbine_voltage']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+46),    "Peak Vibe: {0:.2f}".format(msg['turbine_vibe_peak']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+56),    "Brake PWM: " + str(msg['pwm_value']),  font=oledFont, fill=255)
+
+    oledDisplay.image(oledImage)
+    oledDisplay.display()
 
 def checkButtons():
     buttonState = GPIO.input(21)  # Switch1 (S1)
@@ -715,6 +792,7 @@ def main():
     try:
         initTurbineGPIO()
         initTurbineLED()
+        initOLED()
         initTurbineRPMSensor()
         initTurbineVoltageSensor()
         initTurbineButtons()
@@ -785,16 +863,16 @@ def main():
                 'thing_name': cfgThingName,
                 'deviceID': turbineDeviceId,
                 'timestamp': str(datetime.utcnow().isoformat()),
-                'loop_cnt': str(loopCnt),
+                'loop_cnt': loopCnt,
                 'turbine_speed': turbineRPM,
                 'turbine_rev_cnt': turbineRotationCnt,
-                'turbine_voltage': str(turbineVoltage),
+                'turbine_voltage': turbineVoltage,
                 'turbine_vibe_x': peakVibe_x,
                 'turbine_vibe_y': peakVibe_y,
                 'turbine_vibe_z': peakVibe_z,
                 'turbine_vibe_peak': peakVibe,
                 'turbine_vibe_avg': avgVibe,
-                'turbine_sample_cnt': str(len(vibeDataList)),
+                'turbine_sample_cnt': len(vibeDataList),
                 'pwm_value': turbineBrakePosPWM
             }
 
@@ -836,10 +914,12 @@ def main():
                 if turbineRPM > 0 or lastReportedSpeed != 0:
                     # publish with QOS 0
                     response = awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
+                    updateOledDisplay(devicePayload)
                     ledFlash()
                 else:
                     # publish with QOS 0
                     response = awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
+                    updateOledDisplay(devicePayload)
                     ledFlash()
                     print("Turbine is idle... sleeping for 60 seconds")
                     # sleep a few times with a speed check to see if the turbine is spinning again
