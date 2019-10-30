@@ -399,7 +399,7 @@ def checkButtons():
 
     buttonState = GPIO.input(20)  # Switch2 (S2)
     if buttonState == True:
-        print("Set brake on event")
+        print("Toggle brake on event")
         if brakeState == False:
             processShadowChange("brake_status", "ON", "desired")
             turbineBrakeAction("ON")
