@@ -163,9 +163,6 @@ def initOLED():
 
     # 128x64 display with hardware I2C:
     RST = None     # on the PiOLED this pin isnt used
-    DC = 23
-    SPI_PORT = 0
-    SPI_DEVICE = 0
     oledDisplay = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
     oledDisplay.begin()
 
@@ -428,11 +425,11 @@ def updateOledDisplay():
     x = 0
     oledDraw.text((x, oledTop),       cfgThingName,  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+8),     "IP: " + getIp(),  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+16),    "IoT: " + turbineIoTConnectedState,  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+16),    "IoT:" + turbineIoTConnectedState,  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+26),    "Speed: {0:.1f}".format(lastPayloadMsg['turbine_speed']),  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+36),    "Voltage: {0:.1f}".format(lastPayloadMsg['turbine_voltage']),  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+46),    "Peak Vibe: {0:.2f}".format(lastPayloadMsg['turbine_vibe_peak']),  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+56),    "Brake: " + brakeState + " PWM: " + str(lastPayloadMsg['pwm_value']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+56),    "Brake:" + brakeState + " PWM: " + str(lastPayloadMsg['pwm_value']),  font=oledFont, fill=255)
 
     oledDisplay.image(oledImage)
     oledDisplay.display()
@@ -1014,6 +1011,7 @@ def main():
         ledOff()
         turbineBrakeAction("OFF")
         clearOledDisplay()
+        GPIO.cleanup()
         if not awsShadowClient == None:
             try:
                 awsShadowClient.disconnect()
