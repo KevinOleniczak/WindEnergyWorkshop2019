@@ -62,11 +62,30 @@ turbineDeviceId = str(uuid.getnode())
 # Enable logging
 logger = logging.getLogger(__name__)
 
+#Keep track of iot connection state
+turbineIoTConnectedState = ""
+
 # Keep track of the safety state
 turbineSafetyState = ""
 
 # Keep track of the desired LED state
 ledLastState = ""
+lastPayloadMsg = {
+    'thing_name': cfgThingName,
+    'deviceID': turbineDeviceId,
+    'timestamp': str(datetime.utcnow().isoformat()),
+    'loop_cnt': 0,
+    'turbine_speed': 0,
+    'turbine_rev_cnt': 0,
+    'turbine_voltage': 0,
+    'turbine_vibe_x': 0,
+    'turbine_vibe_y': 0,
+    'turbine_vibe_z': 0,
+    'turbine_vibe_peak': 0,
+    'turbine_vibe_avg': 0,
+    'turbine_sample_cnt': 0,
+    'pwm_value': 0
+    }
 
 # The accelerometer is used to measure vibration levels
 accelerometer = None
@@ -144,9 +163,6 @@ def initOLED():
 
     # 128x64 display with hardware I2C:
     RST = None     # on the PiOLED this pin isnt used
-    DC = 23
-    SPI_PORT = 0
-    SPI_DEVICE = 0
     oledDisplay = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
     oledDisplay.begin()
 
@@ -173,11 +189,11 @@ def initOLED():
     oledFont = ImageFont.load_default()
     oledDraw.text((x, oledTop),       cfgThingName,  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+8),     "IP: " + getIp(),  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+16),    "Connected: ",  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+16),    "IoT: ",  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+26),    "Speed: ",  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+36),    "Voltage: ",  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+46),    "Vibe Peak: ",  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+56),    "Brake PWM: ",  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+56),    "Brake:     PWM:",  font=oledFont, fill=255)
 
     oledDisplay.image(oledImage)
     oledDisplay.display()
@@ -200,6 +216,13 @@ def getLastGreengrassHost():
             ggInfo = json.load(infile)
     return ggInfo
 
+def hostReachable(hostname):
+    #attempt toping the host once and wait 2 seconds
+    status = subprocess.call("ping -c1 -w2 " + hostname + " > /dev/null 2>&1", shell=True)
+    if status == 0:
+      return True
+    else:
+      return False
 
 def discoverGreengrassHost(key, cert, ca):
     # call the Greengrass Discovery API to find the details of the gg group core
@@ -233,14 +256,17 @@ def connectTurbineIoTAttempt(ep, port, rootca, key, cert, timeoutSec, retryLimit
     awsIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
     awsIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
     awsIoTMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
+    awsIoTMQTTClient.configureConnectDisconnectTimeout(timeoutSec) #seconds
+    awsIoTMQTTClient.configureMQTTOperationTimeout(timeoutSec) #seconds
     awsIoTMQTTClient.configureConnectDisconnectTimeout(timeoutSec)
     awsIoTMQTTClient.configureMQTTOperationTimeout(timeoutSec)
+    awsIoTMQTTClient.onOnline = awsIoTClientOnConnectCallback
+    awsIoTMQTTClient.onOffline = awsIoTClientOnDisconnectCallback
 
     # Attempt to connect
     for attempt in range(0, retryLimit):
         try:
-            if awsIoTMQTTClient.connect():
-                print("AWS IoT connected")
+            awsIoTMQTTClient.connect()
         except Exception as e:
             print(str(e))
             continue
@@ -283,6 +309,11 @@ def connectTurbineIoT():
         # attempt to reconnect to the last good host
         ggInfo = getLastGreengrassHost()
 
+        #check if the last good host is still reachable, if not start over
+        if not hostReachable(ggInfo['LAST_HostAddress']):
+            print("Unable to reach last known Greengrass host, will rediscover.")
+            ggInfo = {}
+
         # if not none exists, attempt discovery
         if ggInfo == {}:
             ggInfo = discoverGreengrassHost(key, cert, ca)
@@ -302,6 +333,7 @@ def connectTurbineIoT():
             for ggg in ggInfo['GGGroups']:
                 for core in ggg['Cores']:
                     for conn in core['Connectivity']:
+                        #check if the provided host address is in a list of local interfaces that cannot be used
                         if conn['HostAddress'] not in localNetworks:
                             print("Attempting to connect to Greengrass at: " + conn['HostAddress'] + ":" + str(
                                 conn['PortNumber']))
@@ -326,6 +358,18 @@ def connectTurbineIoT():
 
     return result
 
+#the aws iot sdk provides callbacks for connect and disconnect events
+def awsIoTClientOnConnectCallback():
+    global turbineIoTConnectedState
+    turbineIoTConnectedState = "Connected"
+    updateOledDisplay()
+    print('IoT connection state: ' + turbineIoTConnectedState)
+
+def awsIoTClientOnDisconnectCallback():
+    global turbineIoTConnectedState
+    turbineIoTConnectedState = "Disconnected"
+    updateOledDisplay()
+    print('IoT connection state: ' + turbineIoTConnectedState)
 
 def initTurbineRPMSensor():
     global GPIO
@@ -367,11 +411,11 @@ def initTurbineBrake():
 
 
 def resetTurbineBrake():
-    processShadowChange("brake_status", "OFF", "desired")
+    processShadowChange("brake_status", "OFF", "reported")
     turbineBrakeAction("OFF")
     print("Turbine brake reset")
 
-def updateOledDisplay(msg):
+def updateOledDisplay():
     global oledDisplay, oledDraw, oledImage
 
     width = oledDisplay.width
@@ -381,11 +425,25 @@ def updateOledDisplay(msg):
     x = 0
     oledDraw.text((x, oledTop),       cfgThingName,  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+8),     "IP: " + getIp(),  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+16),    "Connected: ",  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+26),    "Speed: {0:.1f}".format(msg['turbine_speed']),  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+36),    "Voltage: {0:.1f}".format(msg['turbine_voltage']),  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+46),    "Peak Vibe: {0:.2f}".format(msg['turbine_vibe_peak']),  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+56),    "Brake PWM: " + str(msg['pwm_value']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+16),    "IoT:" + turbineIoTConnectedState,  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+26),    "Speed: {0:.1f}".format(lastPayloadMsg['turbine_speed']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+36),    "Voltage: {0:.1f}".format(lastPayloadMsg['turbine_voltage']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+46),    "Peak Vibe: {0:.2f}".format(lastPayloadMsg['turbine_vibe_peak']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+56),    "Brake:" + brakeState + " PWM: " + str(lastPayloadMsg['pwm_value']),  font=oledFont, fill=255)
+
+    oledDisplay.image(oledImage)
+    oledDisplay.display()
+
+def clearOledDisplay():
+    global oledDisplay, oledDraw, oledImage
+
+    width = oledDisplay.width
+    height = oledDisplay.height
+    oledDraw.rectangle((0,0,width,height), outline=0, fill=0)
+
+    x = 0
+    oledDraw.text((x, oledTop),       cfgThingName,  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+8),     "IP: " + getIp(),  font=oledFont, fill=255)
 
     oledDisplay.image(oledImage)
     oledDisplay.display()
@@ -399,10 +457,14 @@ def checkButtons():
 
     buttonState = GPIO.input(20)  # Switch2 (S2)
     if buttonState == True:
-        print("Toggle brake on event")
-        if brakeState == False:
-            processShadowChange("brake_status", "ON", "desired")
+        if brakeState == "OFF":
+            print("Toggle brake on event")
+            processShadowChange("brake_status", "ON", "reported")
             turbineBrakeAction("ON")
+        else:
+            print("Toggle brake off event")
+            processShadowChange("brake_status", "OFF", "reported")
+            turbineBrakeAction("OFF")
         buttonState = False
 
     buttonState = GPIO.input(16)  # Switch3 (S3)
@@ -410,6 +472,7 @@ def checkButtons():
         print("TBD Button")
         buttonState = False
 
+    ##debounce
     sleep(0.1)
 
 
@@ -533,6 +596,7 @@ def turbineBrakeAction(action):
         brakeServo.ChangeDutyCycle(turbineBrakePosPWM)
         sleep(3)
         brakeServo.ChangeDutyCycle(0)
+        brakeState = action
 
     elif action == "OFF":
         print("Resetting turbine brake")
@@ -540,10 +604,13 @@ def turbineBrakeAction(action):
         brakeServo.ChangeDutyCycle(turbineBrakePosPWM)
         sleep(1)
         brakeServo.ChangeDutyCycle(0)
+        brakeState = action
 
     else:
         return "NOT AN ACTION"
-    brakeState = action
+
+    #update the display
+    updateOledDisplay()
 
     shadowPayload = {
         "state": {
@@ -570,7 +637,7 @@ def turbineBrakeAction(action):
 
 
 def turbineBrakeChange(newPWMval, newActionDurSec, newReturnToOff):
-    global brakeServo, brakeState
+    global brakeServo
     brakeServo.ChangeDutyCycle(newPWMval)
 
     if newActionDurSec == None:
@@ -781,6 +848,7 @@ def ledFlash(mode='off-on', duration=None):
 
 
 def main():
+    global lastPayloadMsg
     print("AWS IoT Wind Energy Turbine Program")
     print("DeviceID: " + turbineDeviceId)
     print("ThingName: " + cfgThingName)
@@ -875,6 +943,8 @@ def main():
                 'turbine_sample_cnt': len(vibeDataList),
                 'pwm_value': turbineBrakePosPWM
             }
+            #last payload is used by the oled Display for updates when partial info exists
+            lastPayloadMsg = devicePayload
 
             try:
                 deviceMsg = (
@@ -914,12 +984,12 @@ def main():
                 if turbineRPM > 0 or lastReportedSpeed != 0:
                     # publish with QOS 0
                     response = awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
-                    updateOledDisplay(devicePayload)
+                    updateOledDisplay()
                     ledFlash()
                 else:
                     # publish with QOS 0
                     response = awsIoTMQTTClient.publish(publishTopic, json.dumps(devicePayload), 0)
-                    updateOledDisplay(devicePayload)
+                    updateOledDisplay()
                     ledFlash()
                     print("Turbine is idle... sleeping for 60 seconds")
                     # sleep a few times with a speed check to see if the turbine is spinning again
@@ -927,10 +997,10 @@ def main():
                         calculateTurbineSpeed()
                         lastReportedSpeed = turbineRPM
                         if turbineRPM > 0:
-                            sleep(
-                                5)  # need to do this to allow elapse time to grow for a realistic calculation on the next call
+                            sleep(5)  # need to do this to allow elapse time to grow for a realistic calculation on the next call
                             break
                         sleep(5)  # slow down the publishing rate
+                        checkButtons()
 
             except:
                 logger.warning("exception while publishing")
@@ -939,9 +1009,15 @@ def main():
     except (KeyboardInterrupt, SystemExit):  # when you press ctrl+c
         print("Disconnecting AWS IoT")
         ledOff()
+        turbineBrakeAction("OFF")
+        clearOledDisplay()
+        GPIO.cleanup()
         if not awsShadowClient == None:
-            awsShadowClient.disconnect()
-        sleep(2)
+            try:
+                awsShadowClient.disconnect()
+            except:
+                pass
+        sleep(3)
         print("Done.\nExiting.")
 
 
@@ -997,3 +1073,4 @@ if __name__ == "__main__":
     logging.basicConfig(filename='turbine.log', level=logging.INFO, format='%(asctime)s %(message)s')
     logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter.")
     main()
+

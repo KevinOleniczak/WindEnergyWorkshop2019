@@ -1,119 +1,85 @@
-#Program asks for user input to determine color to shine.
-
-import time, sys
+import sys
 import RPi.GPIO as GPIO
+from time import sleep
 
-redPin = 29   #Set to appropriate GPIO
-greenPin = 31 #Should be set in the 
-bluePin = 33  #GPIO.BOARD format
+successCnt = 0
 
-def blink(pin):
-    GPIO.setmode(GPIO.BOARD)
-    
-    GPIO.setup(pin, GPIO.OUT)
-    GPIO.output(pin, GPIO.HIGH)
-    
-def turnOff(pin):
-    GPIO.setmode(GPIO.BOARD)
-    GPIO.setup(pin, GPIO.OUT)
-    GPIO.output(pin, GPIO.LOW)
-    
-def redOn():
-    blink(redPin)
+#GPIO pins
+redPin = 29
+greenPin = 31
+bluePin = 33
 
-def redOff():
-    turnOff(redPin)
+GPIO.setmode(GPIO.BOARD)
+GPIO.setup(redPin, GPIO.OUT)
+GPIO.setup(greenPin, GPIO.OUT)
+GPIO.setup(bluePin, GPIO.OUT)
 
-def greenOn():
-    blink(greenPin)
+GPIO.output(redPin, GPIO.LOW)
+GPIO.output(greenPin, GPIO.LOW)
+GPIO.output(bluePin, GPIO.LOW)
 
-def greenOff():
-    turnOff(greenPin)
+if len(sys.argv) - 1 > 0:
+    runMode = sys.argv[1]
+else:
+    runMode = 'interactive'
 
-def blueOn():
-    blink(bluePin)
+try:
+    print("Ensure the turbine is connected. Let's test all three primary colors...")
 
-def blueOff():
-    turnOff(bluePin)
-
-def yellowOn():
-    blink(redPin)
-    blink(greenPin)
-
-def yellowOff():
-    turnOff(redPin)
-    turnOff(greenPin)
-
-def cyanOn():
-    blink(greenPin)
-    blink(bluePin)
-
-def cyanOff():
-    turnOff(greenPin)
-    turnOff(bluePin)
-
-def magentaOn():
-    blink(redPin)
-    blink(bluePin)
-
-def magentaOff():
-    turnOff(redPin)
-    turnOff(bluePin)
-
-def whiteOn():
-    blink(redPin)
-    blink(greenPin)
-    blink(bluePin)
-
-def whiteOff():
-    turnOff(redPin)
-    turnOff(greenPin)
-    turnOff(bluePin)
-    
-print("""Ensure the following GPIO connections: R-11, G-13, B-15
-Colors: Red, Green, Blue, Yellow, Cyan, Magenta, and White
-Use the format: color on/color off""")
-
-def main():
-    while True:
-        cmd = raw_input("-->")
-
-
-        if cmd == "red on":
-            redOn()
-        elif cmd == "red off":
-            redOff()
-        elif cmd == "green on":
-            greenOn()
-        elif cmd == "green off":
-            greenOff()
-        elif cmd == "blue on":
-            blueOn()
-        elif cmd == "blue off":
-            blueOff()
-        elif cmd == "yellow on":
-            yellowOn()
-        elif cmd == "yellow off":
-            yellowOff()
-        elif cmd == "cyan on":
-            cyanOn()
-        elif cmd == "cyan off":
-            cyanOff()
-        elif cmd == "magenta on":
-            magentaOn()
-        elif cmd == "magenta off":
-            magentaOff()
-        elif cmd == "white on":
-            whiteOn()
-        elif cmd == "white off":
-            whiteOff()
+    #RED
+    GPIO.output(redPin, GPIO.HIGH)
+    if runMode == 'interactive':
+        answer = raw_input("Do you see RED on the base LED and the LED on top of the turbine? [Y/n]:  ").lower()
+        if answer in ['Y','y']:
+            print("RED is working")
+            GPIO.output(redPin, GPIO.LOW)
+            successCnt += 1
         else:
-            print("Not a valid command")
-        
-        
-    return
-    
+            print("RED is NOT working")
+    else:
+        sleep(2)
+        GPIO.output(redPin, GPIO.LOW)
+        successCnt += 1
 
-main()
-    
+    #GREEN
+    GPIO.output(greenPin, GPIO.HIGH)
+    if runMode == 'interactive':
+        answer = raw_input("Do you see GREEN on the base LED and the LED on top of the turbine? [Y/n]:  ").lower()
+        if answer == 'y':
+            print("GREEN is working")
+            GPIO.output(greenPin, GPIO.LOW)
+            successCnt += 1
+        else:
+            print("GREEN is NOT working")
+    else:
+        sleep(2)
+        GPIO.output(greenPin, GPIO.LOW)
+        successCnt += 1
+
+    #BLUE
+    GPIO.output(bluePin, GPIO.HIGH)
+    if runMode == 'interactive':
+        answer = raw_input("Do you see BLUE on the base LED and the LED on top of the turbine? Y/y or N/n:  ").lower()
+        if answer == 'y':
+            print("BLUE is working")
+            GPIO.output(bluePin, GPIO.LOW)
+            successCnt += 1
+        else:
+            print("BLUE is NOT working")
+    else:
+        sleep(2)
+        GPIO.output(bluePin, GPIO.LOW)
+        successCnt += 1
+
+except:
+    pass
+
+GPIO.cleanup()
+
+if successCnt == 3:
+    print("The RGB LED Light is working")
+    sys.exit(0)
+else:
+    print("The RGB LED Light is NOT working. Check connections.")
+    sys.exit(1)
 
