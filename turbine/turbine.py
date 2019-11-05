@@ -661,9 +661,10 @@ def initShadowVariables():
 
 
 def shadowCallbackReported(payload, responseStatus, token):
-    payloadDict = json.loads(payload)
-    # print ("shadow Report >> " + payload)
     try:
+        payloadDict = json.loads(payload)
+        #print ("shadow Report >> " + payload)
+        
         if "data_path" in payloadDict["state"]["reported"]:
             dataPublishSendMode = payloadDict["state"]["reported"]["data_path"]
 
@@ -712,7 +713,7 @@ def processShadowChange(param, value, type):
 
 def shadowCallbackDelta(payload, responseStatus, token):
     global dataPublishSendMode, dataPublishInterval, vibe_limit, dataPublishHiResSendMode
-    print("delta shadow callback >> " + payload)
+    #print("delta shadow callback >> " + payload)
 
     if responseStatus == "delta/" + cfgThingName:
         payloadDict = json.loads(payload)
