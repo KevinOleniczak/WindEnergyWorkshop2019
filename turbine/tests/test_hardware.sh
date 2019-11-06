@@ -8,6 +8,7 @@ echo "Several tests will be performed with pauses after each one for you to revi
 echo "Optionally you can choose to run this test program in auto mode without prompts by starting this script with the argument 'auto'."
 echo ""
 
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 successCnt=0
 
 if [ $# -eq 0 ]
@@ -30,7 +31,7 @@ echo ""
 echo "****************************************"
 echo "TEST: Accelerometer"
 echo "****************************************"
-python test_accel.py $mode
+python $DIR/test_accel.py $mode
 if [ $? -eq 0 ]
 then
   echo "Accelerometer Sensor >> PASSED"
@@ -50,7 +51,7 @@ echo ""
 echo "****************************************"
 echo "TEST: Rotation Sensor"
 echo "****************************************"
-python test_rpm.py $mode
+python $DIR/test_rpm.py $mode
 if [ $? -eq 0 ]
 then
   echo "Rotation Sensor >> PASSED"
@@ -70,7 +71,7 @@ echo ""
 echo "****************************************"
 echo "TEST: Voltage Sensor"
 echo "****************************************"
-python test_voltage.py $mode
+python $DIR/test_voltage.py $mode
 if [ $? -eq 0 ]
 then
   echo "Voltage Sensor >> PASSED"
@@ -90,7 +91,7 @@ echo ""
 echo "****************************************"
 echo "TEST: RGB LED Light"
 echo "****************************************"
-python test_rgb.py $mode
+python $DIR/test_rgb.py $mode
 if [ $? -eq 0 ]
 then
   echo "RGB LED Light >> PASSED"
@@ -110,7 +111,7 @@ echo ""
 echo "****************************************"
 echo "TEST: Brake Servo"
 echo "****************************************"
-python test_brake_servo.py $mode
+python $DIR/test_brake_servo.py $mode
 if [ $? -eq 0 ]
 then
   echo "Brake Servo >> PASSED"

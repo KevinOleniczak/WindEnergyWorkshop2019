@@ -19,7 +19,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 from time import sleep
-
+import sys
 import Adafruit_GPIO.SPI as SPI
 import Adafruit_SSD1306
 
@@ -28,6 +28,14 @@ from PIL import ImageDraw
 from PIL import ImageFont
 
 import subprocess
+
+if len(sys.argv) - 1 > 0:
+    if sys.argv[1] == 0:
+        msg = 'Hardware Tests: Pass'
+    else:
+        msg = 'Hardware Tests: Fail'
+else:
+    msg = 'Hardware Tests: ?'
 
 # Raspberry Pi pin configuration:
 RST = None     # on the PiOLED this pin isnt used
@@ -100,11 +108,13 @@ while True:
             draw.text((x, top+16),    str(MemUsage),  font=font, fill=255)
             draw.text((x, top+25),    str(Disk),  font=font, fill=255)
 
+            draw.text((x, top+40),    msg,  font=font, fill=255)
+
             # Display image.
             disp.image(image)
             disp.display()
             sleep(1)
-            
+
         except (KeyboardInterrupt, SystemExit):  # when you press ctrl+c
             exit()
         except:
