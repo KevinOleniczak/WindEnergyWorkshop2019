@@ -16,8 +16,8 @@ def MOTION(HallEffect_PIN):
 GPIO.add_event_detect(HallEffect_PIN, GPIO.RISING, callback=MOTION, bouncetime=10)
 
 try:
-    print("Ensure the turbine is spinning. Counting the number of rotations for 10 seconds...")
-    time.sleep(10)
+    print("Ensure the turbine is spinning. Counting the number of rotations for 5 seconds...")
+    time.sleep(5)
     print("Rotations ", PulseCount)
     GPIO.cleanup()
 except:
