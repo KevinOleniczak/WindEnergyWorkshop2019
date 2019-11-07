@@ -248,7 +248,7 @@ def connectTurbineIoTAttempt(ep, port, rootca, key, cert, timeoutSec, retryLimit
     global awsIoTMQTTClient, awsShadowClient, turbineDeviceShadow
 
     awsShadowClient = AWSIoTMQTTShadowClient(cfgThingName)
-    awsShadowClient.configureEndpoint(ep, port)
+    awsShadowClient.configureEndpoint(ep, int(port))
     awsShadowClient.configureCredentials(rootca, key, cert)
     awsIoTMQTTClient = awsShadowClient.getMQTTConnection()
 
