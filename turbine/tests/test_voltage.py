@@ -1,3 +1,4 @@
+from __future__ import division
 import sys
 import Adafruit_MCP3008
 CLK  = 11 #pin 23
@@ -11,13 +12,13 @@ try:
     print("Ensure the turbine is connected and spinning. Attempting to measure voltage generation...")
     mcp = Adafruit_MCP3008.MCP3008(clk=CLK, cs=CS, miso=MISO, mosi=MOSI)
     refVal = mcp.read_adc(0) #turbine is on channel 0
-    calcVolt = round(((3300/1023) * refVal) / 1000, 2)
+    calcVolt = ((3300/1023) * refVal) / 1000
 
     print('Raw ADC Value: ', refVal)
-    print('ADC Voltage: ' + str(calcVolt) + 'V')
+    print("ADC Voltage: {0:.3f} V".format(calcVolt))
 
-except:
-    pass
+except Exception as e:
+        print(str(e))
 
 if refVal == None:
     print("Voltage Sensor is NOT working. Check connections and ensure the turbine is spinning.")
@@ -29,4 +30,5 @@ else:
     else:
         print("Voltage Sensor is working")
         sys.exit(0)
+
 
