@@ -516,6 +516,7 @@ def calibrateTurbineVibeSensor():
     speed = calculateTurbineSpeed()
     while speed > 0:
         print(">>Please stop the turbine from spinning so the calibration can proceed.")
+        turbineBrakeAction("ON", False)
         sleep(3)
         speed = calculateTurbineSpeed()
 
@@ -542,7 +543,7 @@ def calibrateTurbineVibeSensor():
     accelYCal = sum(accelYList) / len(accelYList)
     accelZCal = sum(accelZList) / len(accelZList)
     print('Vibration calibration (XYZ): ' + str(accelXCal) + ' ' + str(accelYCal) + ' ' + str(accelZCal))
-
+    turbineBrakeAction("OFF")
 
 def calculateTurbineVibe():
     global accelX, accelY, accelZ
@@ -585,7 +586,7 @@ def getIp():
     return IP
 
 
-def turbineBrakeAction(action):
+def turbineBrakeAction(action, brakeRelease = True):
     global brakeServo, brakeState, turbineDeviceShadow, turbineBrakePosPWM
     if action == brakeState:
         return "Already there"
@@ -595,7 +596,8 @@ def turbineBrakeAction(action):
         turbineBrakePosPWM = cfgBrakeOnPosition
         brakeServo.ChangeDutyCycle(turbineBrakePosPWM)
         sleep(3)
-        brakeServo.ChangeDutyCycle(0)
+        if brakeRelease:
+            brakeServo.ChangeDutyCycle(0)
         brakeState = action
 
     elif action == "OFF":
@@ -628,7 +630,7 @@ def turbineBrakeAction(action):
             stillTrying = False
         except:
             tryCnt += 1
-            print("Try " + str(tryCnt))
+            #print("Try " + str(tryCnt))
             sleep(1)
             if tryCnt > 10:
                 stillTrying = False
@@ -664,7 +666,7 @@ def shadowCallbackReported(payload, responseStatus, token):
     try:
         payloadDict = json.loads(payload)
         #print ("shadow Report >> " + payload)
-        
+
         if "data_path" in payloadDict["state"]["reported"]:
             dataPublishSendMode = payloadDict["state"]["reported"]["data_path"]
 
@@ -704,7 +706,7 @@ def processShadowChange(param, value, type):
             stillTrying = False
         except:
             tryCnt += 1
-            print("Try " + str(tryCnt))
+            #print("Try " + str(tryCnt))
             sleep(1)
             if tryCnt > 10:
                 stillTrying = False
@@ -756,22 +758,16 @@ def customCallbackCmd(client, userdata, message):
             turbineBrakePosPWM = float(payloadDict["pwm_value"])
             brakeActionDurSec = None
             if "duration_sec" in payloadDict:
-                myDurSec = int(payloadDict["duration_sec"])
+                brakeActionDurSec = int(payloadDict["duration_sec"])
             else:
-                myDurSec = 1
+                brakeActionDurSec = 1
 
             if "return_to_off" in payloadDict:
                 ret2Off = strtobool(payloadDict["return_to_off"].lower())
             else:
                 ret2Off = True
 
-            if "duration_sec" in payloadDict:
-                myDurSec = int(payloadDict["duration_sec"])
-                print("Brake change >> " + str(turbineBrakePosPWM) + " with duration of " + str(myDurSec) + " seconds")
-            else:
-                myDurSec = 1
-                print("Brake change >> " + str(turbineBrakePosPWM) + " with duration of 1 second")
-
+            print("Brake change >> " + str(turbineBrakePosPWM) + " with duration of " + str(brakeActionDurSec) + " seconds and return to off >> " + str(ret2Off))
             turbineBrakeChange(turbineBrakePosPWM, brakeActionDurSec, ret2Off)
 
         except:
@@ -865,11 +861,11 @@ def main():
         initTurbineRPMSensor()
         initTurbineVoltageSensor()
         initTurbineButtons()
+        initTurbineBrake()
         initTurbineVibeSensor()
         calibrateTurbineVibeSensor()
 
         connectTurbineIoT()
-        initTurbineBrake()
         resetTurbineBrake()
         initShadowVariables()
 
