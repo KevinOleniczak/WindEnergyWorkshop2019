@@ -84,7 +84,7 @@ lastPayloadMsg = {
     'turbine_vibe_peak': 0,
     'turbine_vibe_avg': 0,
     'turbine_sample_cnt': 0,
-    'pwm_value': 0
+    'brake_pct': 0
     }
 
 # The accelerometer is used to measure vibration levels
@@ -115,7 +115,7 @@ lastTurbineRotationCnt = 0
 start_timer = time.time()
 
 # Servo control for turbine brake
-turbineBrakePosPWM = cfgBrakeOffPosition
+turbineBrakePosPCT = 0
 turbine_servo_brake_pin = 15  # pin 10
 brakeState = "TBD"
 brakeServo = None
@@ -193,7 +193,7 @@ def initOLED():
     oledDraw.text((x, oledTop+26),    "Speed: ",  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+36),    "Voltage: ",  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+46),    "Vibe Peak: ",  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+56),    "Brake:     PWM:",  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+56),    "Brake:     Pct:",  font=oledFont, fill=255)
 
     oledDisplay.image(oledImage)
     oledDisplay.display()
@@ -429,7 +429,7 @@ def updateOledDisplay():
     oledDraw.text((x, oledTop+26),    "Speed: {0:.1f}".format(lastPayloadMsg['turbine_speed']),  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+36),    "Voltage: {0:.1f}".format(lastPayloadMsg['turbine_voltage']),  font=oledFont, fill=255)
     oledDraw.text((x, oledTop+46),    "Peak Vibe: {0:.2f}".format(lastPayloadMsg['turbine_vibe_peak']),  font=oledFont, fill=255)
-    oledDraw.text((x, oledTop+56),    "Brake:" + brakeState + " PWM: " + str(lastPayloadMsg['pwm_value']),  font=oledFont, fill=255)
+    oledDraw.text((x, oledTop+56),    "Brake:" + brakeState + " Pct: " + str(lastPayloadMsg['brake_pct']),  font=oledFont, fill=255)
 
     oledDisplay.image(oledImage)
     oledDisplay.display()
@@ -585,16 +585,23 @@ def getIp():
         s.close()
     return IP
 
+def getBrakePWM(newPositionPct):
+    try:
+        newPWM = cfgBrakeOffPosition - ((cfgBrakeOffPosition - cfgBrakeOnPosition) * (newPositionPct/100))
+    except:
+        newPWM = cfgBrakeOffPosition
+    return newPWM
 
 def turbineBrakeAction(action, brakeRelease = True):
-    global brakeServo, brakeState, turbineDeviceShadow, turbineBrakePosPWM
+    global brakeServo, brakeState, turbineDeviceShadow, turbineBrakePosPCT
     if action == brakeState:
         return "Already there"
 
     if action == "ON":
         print("Applying turbine brake!")
-        turbineBrakePosPWM = cfgBrakeOnPosition
-        brakeServo.ChangeDutyCycle(turbineBrakePosPWM)
+        turbineBrakePosPCT = 100
+
+        brakeServo.ChangeDutyCycle(getBrakePWM(turbineBrakePosPCT))
         sleep(3)
         if brakeRelease:
             brakeServo.ChangeDutyCycle(0)
@@ -602,8 +609,8 @@ def turbineBrakeAction(action, brakeRelease = True):
 
     elif action == "OFF":
         print("Resetting turbine brake")
-        turbineBrakePosPWM = cfgBrakeOffPosition
-        brakeServo.ChangeDutyCycle(turbineBrakePosPWM)
+        turbineBrakePosPCT = 0
+        brakeServo.ChangeDutyCycle(getBrakePWM(turbineBrakePosPCT))
         sleep(1)
         brakeServo.ChangeDutyCycle(0)
         brakeState = action
@@ -638,9 +645,9 @@ def turbineBrakeAction(action, brakeRelease = True):
     return brakeState
 
 
-def turbineBrakeChange(newPWMval, newActionDurSec, newReturnToOff):
+def turbineBrakeChange(newPCTval, newActionDurSec, newReturnToOff):
     global brakeServo
-    brakeServo.ChangeDutyCycle(newPWMval)
+    brakeServo.ChangeDutyCycle(getBrakePWM(newPCTval))
 
     if newActionDurSec == None:
         sleep(1)
@@ -663,6 +670,7 @@ def initShadowVariables():
 
 
 def shadowCallbackReported(payload, responseStatus, token):
+    global cfgBrakeOnPosition, cfgBrakeOffPosition
     try:
         payloadDict = json.loads(payload)
         #print ("shadow Report >> " + payload)
@@ -678,6 +686,12 @@ def shadowCallbackReported(payload, responseStatus, token):
 
         if "hires_publish_mode" in payloadDict["state"]["reported"]:
             dataPublishHiResSendMode = payloadDict["state"]["reported"]["hires_publish_mode"]
+
+        if "brake_on_pwm" in payloadDict["state"]["reported"]:
+            cfgBrakeOnPosition = float(payloadDict["state"]["reported"]["brake_on_pwm"])
+
+        if "brake_off_pwm" in payloadDict["state"]["reported"]:
+            cfgBrakeOffPosition = float(payloadDict["state"]["reported"]["brake_off_pwm"])
 
         print("Turbine is in sync with the shadow settings.")
 
@@ -714,7 +728,7 @@ def processShadowChange(param, value, type):
 
 
 def shadowCallbackDelta(payload, responseStatus, token):
-    global dataPublishSendMode, dataPublishInterval, vibe_limit, dataPublishHiResSendMode
+    global dataPublishSendMode, dataPublishInterval, vibe_limit, dataPublishHiResSendMode, cfgBrakeOnPosition, cfgBrakeOffPosition
     #print("delta shadow callback >> " + payload)
 
     if responseStatus == "delta/" + cfgThingName:
@@ -734,6 +748,12 @@ def shadowCallbackDelta(payload, responseStatus, token):
             if "hires_publish_mode" in payloadDict["state"]:
                 dataPublishHiResSendMode = payloadDict["state"]["hires_publish_mode"]
                 processShadowChange("hires_publish_mode", dataPublishHiResSendMode, "reported")
+            if "brake_on_pwm" in payloadDict["state"]:
+                cfgBrakeOnPosition = float(payloadDict["state"]["brake_on_pwm"])
+                processShadowChange("brake_on_pwm", cfgBrakeOnPosition, "reported")
+            if "brake_off_pwm" in payloadDict["state"]:
+                cfgBrakeOffPosition = float(payloadDict["state"]["brake_off_pwm"])
+                processShadowChange("brake_off_pwm", cfgBrakeOffPosition, "reported")
         except Exception as e:
             print("delta cb error: " + str(e))
 
@@ -750,12 +770,12 @@ def shadowCallback(payload, responseStatus, token):
 
 
 def customCallbackCmd(client, userdata, message):
-    global turbineBrakePosPWM
+    global turbineBrakePosPCT
 
     if message.topic == "cmd/windfarm/turbine/" + cfgThingName + "/brake":
         payloadDict = json.loads(message.payload)
         try:
-            turbineBrakePosPWM = float(payloadDict["pwm_value"])
+            turbineBrakePosPCT = float(payloadDict["brake_pct"])
             brakeActionDurSec = None
             if "duration_sec" in payloadDict:
                 brakeActionDurSec = int(payloadDict["duration_sec"])
@@ -767,8 +787,8 @@ def customCallbackCmd(client, userdata, message):
             else:
                 ret2Off = True
 
-            print("Brake change >> " + str(turbineBrakePosPWM) + " with duration of " + str(brakeActionDurSec) + " seconds and return to off >> " + str(ret2Off))
-            turbineBrakeChange(turbineBrakePosPWM, brakeActionDurSec, ret2Off)
+            print("Brake change >> " + str(turbineBrakePosPCT) + "% with duration of " + str(brakeActionDurSec) + " seconds and return to off >> " + str(ret2Off))
+            turbineBrakeChange(turbineBrakePosPCT, brakeActionDurSec, ret2Off)
 
         except:
             print("brake change failed")
@@ -938,7 +958,7 @@ def main():
                 'turbine_vibe_peak': peakVibe,
                 'turbine_vibe_avg': avgVibe,
                 'turbine_sample_cnt': len(vibeDataList),
-                'pwm_value': turbineBrakePosPWM
+                'brake_pct': turbineBrakePosPCT
             }
             #last payload is used by the oled Display for updates when partial info exists
             lastPayloadMsg = devicePayload
@@ -950,7 +970,7 @@ def main():
                     'Rotations:{2} '
                     'Peak-Vibe:{3:.3f} '
                     'Avg-Vibe:{4:.3f} '
-                    'Brake-PWM:{5} '
+                    'Brake-PCT:{5} '
                     'LoopCnt:{6} '
                 ).format(
                     turbineRPM,
@@ -958,7 +978,7 @@ def main():
                     turbineRotationCnt,
                     peakVibe,
                     avgVibe,
-                    turbineBrakePosPWM,
+                    turbineBrakePosPCT,
                     loopCnt
                 )
                 print(deviceMsg)
