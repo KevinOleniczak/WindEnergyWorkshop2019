@@ -31,6 +31,7 @@ import time
 
 # Raspberry Pi pin configuration:
 RST = None     # on the PiOLED this pin isnt used
+lastMessage = ""
 
 # 128x64 display with hardware I2C:
 disp = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
@@ -46,6 +47,15 @@ ledBluePin = 13
 def initGPIO():
     global GPIO
     GPIO.setmode(GPIO.BCM)
+
+def resetGPIO():
+    global GPIO
+    #need to reinitialize gpio pins since there was contention for them in the full diagnostic tests
+    GPIO.cleanup()
+    initGPIO()
+    initHall()
+    initTurbineLED()
+    initButtons()
 
 def ledOn(color=None):
     global ledLastState, GPIO
@@ -106,8 +116,16 @@ def initHall():
     GPIO.setup(HallEffect_PIN, GPIO.IN)
     GPIO.add_event_detect(HallEffect_PIN, GPIO.RISING, callback=MOTION, bouncetime=10)
 
+def runFullDiagnostic():
+    global GPIO
+    resultMsg = "Full Test: Starting..."
+    updateOLED(resultMsg)
+    return_code = subprocess.call('/home/pi/WindEnergyWorkshop2019/turbine/tests/test_hardware.sh auto', shell=True)
+    resetGPIO()
+    return return_code
+
 def checkRPM():
-    global PulseCount
+    global PulseCount, GPIO
     try:
         resultMsg = "RPM Test: Starting..."
         updateOLED(resultMsg)
@@ -117,8 +135,10 @@ def checkRPM():
         print("Rotations ", PulseCount)
         if PulseCount > 0:
             resultMsg = "RPM Test: Pass"
+            ledOn("green")
         else:
             resultMsg = "RPM Test: Fail"
+            ledOn("red")
         updateOLED(resultMsg)
         sleep(5)
     except:
@@ -131,6 +151,7 @@ def checkButtons():
 
     buttonState = GPIO.input(20)  # Switch2 (S2)
     if buttonState == True:
+        updateOLED(processDiagResult(runFullDiagnostic()))
         buttonState = False
 
     buttonState = GPIO.input(16)  # Switch3 (S3)
@@ -155,7 +176,17 @@ def initOLED():
     except:
         oledConnected = False
 
-def updateOLED(aMessage):
+def processDiagResult(aResult):
+    if aResult == 0:
+        msg = 'Hardware Tests: Pass'
+        ledOn("green")
+    else:
+        msg = 'Hardware Tests: Fail'
+        ledOn("red")
+    return msg
+
+def updateOLED(aMessage = None):
+    global lastMessage
     # Create blank image for drawing.
     # Make sure to create image with mode '1' for 1-bit color.
     width = disp.width
@@ -199,6 +230,10 @@ def updateOLED(aMessage):
     draw.text((x, top+25),    str(Disk),  font=font, fill=255)
 
     #Diagnostic test result
+    if aMessage == None:
+        aMessage = lastMessage
+    else:
+        lastMessage = aMessage
     draw.text((x, top+40),    aMessage,  font=font, fill=255)
 
     # Display image.
@@ -206,41 +241,34 @@ def updateOLED(aMessage):
     disp.display()
 
 def main():
-    global oledConnected
-    initGPIO()
-    initHall()
-    initTurbineLED()
-    initButtons()
+    global oledConnected, lastMessage, GPIO
+    resetGPIO()
 
     if len(sys.argv) - 1 > 0:
-        if sys.argv[1] == 0:
-            msg = 'Hardware Tests: Pass'
-            ledOn("green")
-        else:
-            msg = 'Hardware Tests: Fail'
-            ledOn("red")
-    else:
-        msg = 'Hardware Tests: ?'
-        ledOn("blue")
+        lastMessage = processDiagResult(sys.argv[1])
+    try:
+        while True:
+            if not oledConnected:
+                initOLED()
 
-    while True:
-        if not oledConnected:
-            initOLED()
+            if oledConnected:
+                try:
+                    checkButtons()
+                    updateOLED()
+                    sleep(5)
 
-        if oledConnected:
-            try:
-                checkButtons()
-                updateOLED(msg)
-                sleep(5)
+                except (KeyboardInterrupt, SystemExit):  # when you press ctrl+c
+                    exit()
+                except Exception as e:
+                    print(str(e))
+                    oledConnected = False
+            else:
+                #wait and try to find the board again
+                sleep(10)
 
-            except (KeyboardInterrupt, SystemExit):  # when you press ctrl+c
-                exit()
-            except Exception as e:
-                print(str(e))
-                oledConnected = False
-        else:
-            #wait and try to find the board again
-            sleep(10)
+    except (KeyboardInterrupt, SystemExit):  # when you press ctrl+c
+        ledOff()
+        GPIO.cleanup()            
 
 if __name__ == "__main__":
     main()
