@@ -1,2 +1,2 @@
-python turbine.py --config ~/certs/config.json 
+python ~/WindEnergyWorkshop2019/turbine/turbine.py --config ~/certs/config.json 
 
