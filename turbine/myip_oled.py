@@ -177,11 +177,12 @@ def initOLED():
         oledConnected = False
 
 def processDiagResult(aResult):
-    if aResult == 0:
-        msg = 'Hardware Tests: Pass'
+    print(aResult)
+    if int(aResult) == 0:
+        msg = 'Hardware: Pass'
         ledOn("green")
     else:
-        msg = 'Hardware Tests: Fail'
+        msg = 'Hardware: Fail ' + str(aResult)
         ledOn("red")
     return msg
 
@@ -264,11 +265,11 @@ def main():
                     oledConnected = False
             else:
                 #wait and try to find the board again
-                sleep(10)
+                sleep(5)
 
     except (KeyboardInterrupt, SystemExit):  # when you press ctrl+c
         ledOff()
-        GPIO.cleanup()            
+        GPIO.cleanup()
 
 if __name__ == "__main__":
     main()

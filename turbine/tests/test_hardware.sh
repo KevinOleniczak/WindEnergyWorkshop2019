@@ -10,6 +10,7 @@ echo ""
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 successCnt=0
+results="0x0"
 
 if [ $# -eq 0 ]
 then
@@ -38,6 +39,7 @@ then
   ((successCnt=successCnt+1))
 else
   echo "Accelerometer Sensor >> FAILED"
+  ((results = results | 0x1))
 fi
 
 if [ $mode != "auto" ]
@@ -58,6 +60,7 @@ then
   ((successCnt=successCnt+1))
 else
   echo "Rotation Sensor >> FAILED"
+  ((results = results | 0x2))
 fi
 
 if [ $mode != "auto" ]
@@ -78,6 +81,7 @@ then
   ((successCnt=successCnt+1))
 else
   echo "Voltage Sensor >> FAILED"
+  ((results = results | 0x4))
 fi
 
 if [ $mode != "auto" ]
@@ -98,6 +102,7 @@ then
   ((successCnt=successCnt+1))
 else
   echo "RGB LED Light >> FAILED"
+  ((results = results | 0x8))
 fi
 
 if [ $mode != "auto" ]
@@ -118,6 +123,7 @@ then
   ((successCnt=successCnt+1))
 else
   echo "Brake Servo >> FAILED"
+  ((results = results | 0x10))
 fi
 
 if [ $successCnt -eq 5 ]
@@ -125,7 +131,9 @@ then
   echo "All tests passed"
   exit 0
 else
+  echo ""
   echo "Some tests failed"
-  exit 1
+  echo $results
+  exit $results
 fi
 
