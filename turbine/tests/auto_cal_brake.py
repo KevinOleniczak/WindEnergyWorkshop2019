@@ -1,6 +1,9 @@
 import RPi.GPIO as GPIO
 import time
 import sys
+import getopt
+import os
+import json
 
 # Turbine rotation speed sensor
 turbine_rotation_sensor_pin = 26  # pin 37
@@ -50,50 +53,145 @@ def initTurbineBrake():
     print("Turbine brake connected")
 
 brakePin = 10
-successCnt = 0
-initTurbineGPIO()
-initTurbineRPMSensor()
-initTurbineBrake()
+pwm_off = 10
+stopped_at_pwm = 10
+configFile = ''
 
-try:
-    print("Ensure the turbine is spinning relatively fast. The turbine brake will be applied to determine the optimal min and max position. Do not change the wind source while this takes place.")
+def main():
+    global stopped_at_pwm, pwm_off
+    successCnt = 0
+    initTurbineGPIO()
+    initTurbineRPMSensor()
+    initTurbineBrake()
 
-    pwm_start = 10
-    brakeServo.start(pwm_start)
-    calculateTurbineSpeed()
-    time.sleep(5)
-    calculateTurbineSpeed()
-    print("Turbine speed: " + str(turbineRPM))
+    try:
+        print("Ensure the turbine is spinning relatively fast. The turbine brake will be applied to determine the optimal min and max position. Do not change the wind source while this takes place.")
 
-    if turbineRPM == 0:
-        print("Turbine is not spinning. Can't do the auto calibrate without wind.")
+        pwm_start = 10
+        pwm = pwm_start
+        brakeServo.start(pwm_start)
+        calculateTurbineSpeed()
+        time.sleep(5)
+        calculateTurbineSpeed()
+        print("Turbine speed: " + str(turbineRPM))
+        starting_turbine_speed = turbineRPM
+
+        if turbineRPM == 0:
+            print("Turbine is not spinning. Can't do the auto calibrate without wind.")
+        else:
+            for i in range(1, pwm_start*10):
+                if turbineRPM < (starting_turbine_speed * .8):
+                    pwm -= 0.1
+                else:
+                    pwm -= 0.2
+                print("Trying {0:.1f}".format(pwm))
+                brakeServo.ChangeDutyCycle(pwm)
+                time.sleep(2)
+                calculateTurbineSpeed()
+                print("Turbine speed: " + str(turbineRPM))
+                if turbineRPM == 0:
+                    print("Found an initial stopping point at " + str(pwm))
+                    stopped_at_pwm = pwm - 0.2
+                    print("Applying a little extra stopping pressure")
+                    break
+
+        #Off
+        print("Letting the turbine speed up again...")
+        brakeServo.ChangeDutyCycle(pwm_start)
+        time.sleep(7)
+        calculateTurbineSpeed()
+        print("Turbine speed: " + str(turbineRPM))
+
+        #test if the stop point can provide hard braking
+        print("Applying full braking force to test hard stopping")
+        brakeServo.ChangeDutyCycle(stopped_at_pwm)
+        time.sleep(5)
+        calculateTurbineSpeed()
+        time.sleep(5)
+        calculateTurbineSpeed()
+        print("Turbine speed: " + str(turbineRPM))
+
+        if turbineRPM == 0:
+            print("That value looks good for quick stopping")
+            successCnt = 1
+        else:
+            for i in range (1, 5):
+                print("More braking force needed... adding force")
+                stopped_at_pwm -= 0.1
+                time.sleep(5)
+                print("Trying {0:.1f}".format(stopped_at_pwm))
+                brakeServo.ChangeDutyCycle(stopped_at_pwm)
+                time.sleep(5)
+                calculateTurbineSpeed()
+                print("Turbine speed: " + str(turbineRPM))
+                if turbineRPM == 0:
+                    print("That value looks good for quick stopping")
+                    successCnt = 1
+                    break
+                else:
+                    print("Unable to completely stop the turbine")
+
+        #off
+        pwm_off = stopped_at_pwm + 1
+        brakeServo.ChangeDutyCycle(pwm_off)
+        time.sleep(1)
+        brakeServo.ChangeDutyCycle(0)
+
+    except Exception as e:
+        s = str(e)
+        print(s)
+
+    GPIO.cleanup()
+
+    if successCnt == 1:
+        print("Success")
+        print("Brake on  position determined to be: {0:.1f}".format(stopped_at_pwm))
+        print("Brake off position determined to be: {0:.1f}".format(pwm_off))
+
+        with open(configFile, 'r+') as f:
+            myConfig = json.load(f)
+            myConfig['settings']['brakeServo']['onPosition'] = round(stopped_at_pwm,2)
+            myConfig['settings']['brakeServo']['offPosition'] = round(pwm_off,2)
+            f.seek(0)
+            json.dump(myConfig, f)
+
+        sys.exit(0)
     else:
-        for i in range(1, pwm_start*10):
-            pwm = pwm_start - float(i)/10
-            print("Trying {0:.1f}".format(pwm))
-            brakeServo.ChangeDutyCycle(pwm)
-            time.sleep(2)
-            calculateTurbineSpeed()
-            print(turbineRPM)
-            if turbineRPM == 0:
-                print("found a stop point at " + str(pwm))
-                successCnt = 1
-                break
+        print("Failed to find a good stop point")
+        sys.exit(1)
 
-    #Off
-    brakeServo.ChangeDutyCycle(pwm_start)
-    time.sleep(0.5)
-    brakeServo.ChangeDutyCycle(0)
+if __name__ == "__main__":
+    #global configFile
 
-except:
-    pass
+    # Usage
+    usageInfo = """Usage:
 
-GPIO.cleanup()
+    python auto_cal_brake.py --config <config json file>
+    """
 
-if successCnt == 1:
-    print("Success")
-    sys.exit(0)
-else:
-    print("Failed to find a good stop point")
-    sys.exit(1)
+    # Read in command-line parameters
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "", ["config="])
+        if len(opts) == 0:
+            raise getopt.GetoptError("No input parameters!")
+        for opt, arg in opts:
+            if opt in ("--config"):
+                configFile = arg
+                if not os.path.isfile(configFile):
+                    print("Config file is invalid")
+                    exit(1)
+
+    except getopt.GetoptError:
+        print(usageInfo)
+        exit(1)
+
+    # Missing configuration notification
+    missingConfiguration = False
+    if not configFile:
+        print("Missing '--config' ")
+        missingConfiguration = True
+    if missingConfiguration:
+        exit(2)
+
+    main()
 
