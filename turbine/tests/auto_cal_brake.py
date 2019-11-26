@@ -153,6 +153,7 @@ def main():
             myConfig['settings']['brakeServo']['onPosition'] = round(stopped_at_pwm,2)
             myConfig['settings']['brakeServo']['offPosition'] = round(pwm_off,2)
             f.seek(0)
+            f.truncate()
             json.dump(myConfig, f)
 
         sys.exit(0)
