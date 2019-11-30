@@ -18,5 +18,8 @@
       "retryLimit": 3,
       "useGreengrass": "no"
     }
+  },
+  "settings": {
+    "location": "" 
   }
 }

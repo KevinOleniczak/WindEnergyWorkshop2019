@@ -44,6 +44,7 @@ cfgGgHost = ""
 cfgTimeoutSec = 10
 cfgRetryLimit = 3
 cfgUseGreengrass = "no"
+cfgLocation = ""
 
 #determine a unique deviceID for this Raspberry PI to be used in the IoT message
 # getnode() - Gets the hardware address as a 48-bit positive integer
@@ -421,6 +422,7 @@ def main():
             devicePayload = {
                 'thing_name' : cfgThingName,
                 'deviceID' : weatherDeviceId,
+                'location': cfgLocation,
                 'timestamp' : str(datetime.utcnow().isoformat()),
                 'loop_cnt' : str(loopCnt),
                 'wind_speed' : windSpeedMPH
@@ -511,6 +513,7 @@ if __name__ == "__main__":
                     cfgTimeoutSec = myConfig['runtime']['connection']['timeoutSec']
                     cfgRetryLimit = myConfig['runtime']['connection']['retryLimit']
                     cfgUseGreengrass = myConfig['runtime']['connection']['useGreengrass']
+                    cfgLocation = myConfig['settings']['location']
 
     except getopt.GetoptError:
             print(usageInfo)
