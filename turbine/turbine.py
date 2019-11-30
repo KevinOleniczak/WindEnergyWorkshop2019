@@ -54,6 +54,7 @@ cfgUseGreengrass = "no"
 cfgBrakeOnPosition = 6.5
 cfgBrakeOffPosition = 7.5
 cfgVibeDataSampleCnt = 50
+cfgBrakePressureFactor = 1
 
 # determine a unique deviceID for this Raspberry PI to be used in the IoT message
 # getnode() - Gets the hardware address as a 48-bit positive integer
@@ -652,7 +653,7 @@ def turbineBrakeChange(newPCTval, newActionDurSec, newReturnToOff):
     if newActionDurSec == None:
         sleep(1)
     else:
-        sleep(newActionDurSec)
+        sleep(newActionDurSec * cfgBrakePressureFactor)
 
     if newReturnToOff:
         # return to off position and then stop
@@ -728,7 +729,7 @@ def processShadowChange(param, value, type):
 
 
 def shadowCallbackDelta(payload, responseStatus, token):
-    global dataPublishSendMode, dataPublishInterval, vibe_limit, dataPublishHiResSendMode, cfgBrakeOnPosition, cfgBrakeOffPosition
+    global dataPublishSendMode, dataPublishInterval, vibe_limit, dataPublishHiResSendMode, cfgBrakeOnPosition, cfgBrakeOffPosition, cfgBrakePressureFactor
     #print("delta shadow callback >> " + payload)
 
     if responseStatus == "delta/" + cfgThingName:
@@ -754,6 +755,9 @@ def shadowCallbackDelta(payload, responseStatus, token):
             if "brake_off_pwm" in payloadDict["state"]:
                 cfgBrakeOffPosition = float(payloadDict["state"]["brake_off_pwm"])
                 processShadowChange("brake_off_pwm", cfgBrakeOffPosition, "reported")
+            if "brake_pressure_factor" in payloadDict["state"]:
+                cfgBrakePressureFactor = int(payloadDict["state"]["brake_pressure_factor"])
+                processShadowChange("brake_pressure_factor", cfgBrakePressureFactor, "reported")
         except Exception as e:
             print("delta cb error: " + str(e))
 
