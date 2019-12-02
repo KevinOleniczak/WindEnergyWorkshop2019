@@ -132,7 +132,7 @@ def main():
                     print("Unable to completely stop the turbine")
 
         #off
-        pwm_off = stopped_at_pwm + 1
+        pwm_off = stopped_at_pwm + 0.8 
         brakeServo.ChangeDutyCycle(pwm_off)
         time.sleep(1)
         brakeServo.ChangeDutyCycle(0)
