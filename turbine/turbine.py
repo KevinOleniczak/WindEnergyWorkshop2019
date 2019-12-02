@@ -56,6 +56,8 @@ cfgBrakeOffPosition = 7.5
 cfgVibeDataSampleCnt = 50
 cfgBrakePressureFactor = 1
 
+vibe_limit = 5
+
 # determine a unique deviceID for this Raspberry PI to be used in the IoT message
 # getnode() - Gets the hardware address as a 48-bit positive integer
 turbineDeviceId = str(uuid.getnode())
@@ -671,7 +673,7 @@ def initShadowVariables():
 
 
 def shadowCallbackReported(payload, responseStatus, token):
-    global cfgBrakeOnPosition, cfgBrakeOffPosition
+    global dataPublishSendMode, dataPublishInterval, dataPublishHiResSendMode, vibe_limit
     try:
         payloadDict = json.loads(payload)
         #print ("shadow Report >> " + payload)
@@ -687,12 +689,6 @@ def shadowCallbackReported(payload, responseStatus, token):
 
         if "hires_publish_mode" in payloadDict["state"]["reported"]:
             dataPublishHiResSendMode = payloadDict["state"]["reported"]["hires_publish_mode"]
-
-        if "brake_on_pwm" in payloadDict["state"]["reported"]:
-            cfgBrakeOnPosition = float(payloadDict["state"]["reported"]["brake_on_pwm"])
-
-        if "brake_off_pwm" in payloadDict["state"]["reported"]:
-            cfgBrakeOffPosition = float(payloadDict["state"]["reported"]["brake_off_pwm"])
 
         print("Turbine is in sync with the shadow settings.")
 
@@ -942,7 +938,7 @@ def main():
                 else:
                     avgVibe = 0
 
-                determineTurbineSafetyState(peakVibe)
+                determineTurbineSafetyState(peakVibe, vibe_limit)
             else:
                 print("The turbine appears to be disconnected. Please check the connection.")
 
@@ -1094,4 +1090,3 @@ if __name__ == "__main__":
     logging.basicConfig(filename='turbine.log', level=logging.INFO, format='%(asctime)s %(message)s')
     logger.info("Welcome to the AWS Wind Energy Turbine Device Reporter.")
     main()
-
