@@ -425,7 +425,7 @@ def main():
                 'location': cfgLocation,
                 'timestamp' : str(datetime.utcnow().isoformat()),
                 'loop_cnt' : str(loopCnt),
-                'wind_speed' : windSpeedMPH
+                'wind_speed' : str(round(windSpeedMPH,2))
                 }
 
             try:
